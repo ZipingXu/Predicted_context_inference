@@ -12,7 +12,7 @@ e_dict[-1] = {"e": [-1, 2], "p": [2/3, 1/3]}
 sigma_e = (2./3 * 1 + 1./3 * 4)
 # variance of x_t
 sigma_s = np.sum((x_dict-(np.mean(x_dict, axis=0)))**2, axis=0)
-sigma_s_gaussian = 1
+# sigma_s_gaussian = 1
 
 # following two functions are for generating x_tilde_list of dimension (T, d)
 
@@ -31,6 +31,6 @@ def generate_x_tilde(T):
     return x_list, x_tilde_list
 
 def generate_x_tilde_gaussian(T, sigma_s, sigma_e, d):
-    x_list = np.random.multivariate_normal(np.zeros(d), sigma_s_gaussian, T)
-    x_tilde_list = x_list + np.random.multivariate_normal(np.zeros(d), sigma_e, T)
+    x_list = np.random.multivariate_normal(np.zeros(d), np.array([[sigma_s]]), T)
+    x_tilde_list = x_list + np.random.multivariate_normal(np.zeros(d), np.array([[sigma_e]]), T)
     return x_list, x_tilde_list

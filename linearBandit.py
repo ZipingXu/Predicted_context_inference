@@ -1,9 +1,37 @@
 import numpy as np
 import scipy.stats as stats
-from utility import prob_clip
+from utility import prob_clip, compute_coverage, weighted_theta_est, estimate_variance
+
+
+class weighted_theta_est:
+    def __init__(self, args):
+        self.args = args
+        self.pi_nd = args.pi_nd
+        self.sigma_e = args.sigma_e
+        self.n_action = args.n_action
+        self.d = args.d
+        self.initialize()
+    def initialize(self):
+        self.V_t = np.zeros((self.n_action, self.d, self.d))
+        self.W_t = np.zeros((self.n_action, self.d, self.d))
+        self.b_t = np.zeros((self.n_action, self.d))
+    def update(self, x_tilde_t, a_t, r_t, pi_t):
+        imp_weight_at = self.pi_nd[a_t] / pi_t[a_t]
+        for a in range(self.n_action):
+            if a == a_t:
+                self.V_t[a,:,:] += imp_weight_at * (np.outer(x_tilde_t, x_tilde_t) - self.sigma_e * np.eye(self.d))
+                self.b_t[a,:] += imp_weight_at * x_tilde_t * r_t
+            # self.W_t[a,:,:] += self.pi_nd[a] * self.sigma_e * np.eye(self.d)
+    def get_theta_est(self):
+        theta_st = np.zeros((self.n_action, self.d))
+        for a in range(self.n_action):
+            theta_st[a,:] = np.matmul(np.linalg.pinv(self.V_t[a,:,:]), self.b_t[a,:])
+        return theta_st
+
+
 
 class LinBandit:
-    def __init__(self, theta=None, sigma=None, n_action=None):
+    def __init__(self, theta=None, sigma=None, n_action=None, args=None):
         """Initialize a bandit model with parameters theta and phi
         r = <theta_a, s> + eta, eta~N(0, sigma^2)
         
@@ -16,6 +44,8 @@ class LinBandit:
         self.sigma = sigma 
         self.n_action = n_action if theta is None else theta.shape[1]
         self.dim = None if theta is None else theta.shape[0]
+        self.args = args
+        self.coverage_freq = args.coverage_freq
 
     def mean_reward(self, s, a):
         """Compute mean reward for state s and action a"""
@@ -115,6 +145,8 @@ class LinBandit:
             
         T = x_list.shape[0]
         d = self.dim
+
+        self.w_est_cal = weighted_theta_est(args = self.args)
         
         # Initialize tracking variables
         theta_est_list = np.zeros((self.n_action, T, d))
@@ -123,7 +155,18 @@ class LinBandit:
         estimation_err_list = np.zeros((T, self.n_action))
         regret_list = np.zeros(T)
         pi_list_test = np.zeros((T, self.n_action))
-        
+        coverage_list = []
+
+        history = {
+            "x_list": x_list,
+            "x_tilde_list": x_tilde_list,
+            "potential_reward_list": potential_reward_list,
+            "theta_est_list": theta_est_list,
+            "at_list": at_list,
+            "pi_list": pi_list,
+            "pi_list_test": pi_list_test,
+            "coverage_list": coverage_list
+        }
         # Initialize algorithm state
         regret = 0
         Vt = np.zeros((self.n_action, d, d))
@@ -179,6 +222,13 @@ class LinBandit:
             Vt[at,:,:] += np.outer(x_tilde_t, x_tilde_t)
             bt[at,:] += x_tilde_t * rt
 
+            self.w_est_cal.update(x_tilde_t, at, rt, pi_list[t,:])
+            # Compute coverage
+            if (t+1) % self.coverage_freq == 0:
+                w_theta_est = self.w_est_cal.get_theta_est().T
+                var_est = estimate_variance(theta_hat = theta_est_list[:, t, :].T, args = self.args) / (t+1)
+                coverage_list.append(compute_coverage(cur_theta_est = w_theta_est[0, 0], var_est = var_est[0, 0, 0], theta_true = self.theta[0, 0]))
+
         return {
             "x_list": x_list,
             "x_tilde_list": x_tilde_list,
@@ -186,7 +236,8 @@ class LinBandit:
             "theta_est_list": theta_est_list,
             "at_list": at_list,
             "pi_list": pi_list,
-            "pi_list_test": pi_list_test
+            "pi_list_test": pi_list_test,
+            "coverage_list": coverage_list
         }
 
     def UCB_w_predicted_state(self, x_list, x_tilde_list, potential_reward_list, C, l=1., p_0=0.2, x_tilde_test=None):
@@ -210,6 +261,8 @@ class LinBandit:
             
         T = x_list.shape[0]
         d = self.dim
+
+        self.w_est_cal = weighted_theta_est(args = self.args)
         
         # Initialize tracking variables
         theta_est_list = np.zeros((self.n_action, T, d))
@@ -218,7 +271,17 @@ class LinBandit:
         estimation_err_list = np.zeros((T, self.n_action))
         regret_list = np.zeros(T)
         pi_list_test = np.zeros((T, self.n_action))
-        
+        coverage_list = []
+        history = {
+            "x_list": x_list,
+            "x_tilde_list": x_tilde_list,
+            "potential_reward_list": potential_reward_list,
+            "theta_est_list": theta_est_list,
+            "at_list": at_list,
+            "pi_list": pi_list,
+            "pi_list_test": pi_list_test,
+            "coverage_list": coverage_list
+        }
         # Initialize algorithm state
         regret = 0
         Vt = np.zeros((self.n_action, d, d))
@@ -272,10 +335,18 @@ class LinBandit:
             at = np.random.binomial(1, pi_list[t,1])
             at_list[t] = at
             rt = potential_reward_list[t,at]
+
+            self.w_est_cal.update(x_tilde_t, at, rt, pi_list[t,:])
             
             # Update sufficient statistics
             Vt[at,:,:] += np.outer(x_tilde_t, x_tilde_t)
             bt[at,:] += x_tilde_t * rt
+
+            # Compute coverage
+            if (t+1) % self.coverage_freq == 0:
+                w_theta_est = self.w_est_cal.get_theta_est().T
+                var_est = estimate_variance(theta_hat = theta_est_list[:, t, :].T, args = self.args) / (t+1)
+                coverage_list.append(compute_coverage(cur_theta_est = w_theta_est[0, 0], var_est = var_est[0, 0, 0], theta_true = self.theta[0, 0]))
 
         return {
             "x_list": x_list,
@@ -284,10 +355,11 @@ class LinBandit:
             "theta_est_list": theta_est_list,
             "at_list": at_list,
             "pi_list": pi_list,
-            "pi_list_test": pi_list_test
+            "pi_list_test": pi_list_test,
+            "coverage_list": coverage_list
         }
 
-    def online_me_adjust_w_predicted_state(self, x_list, x_tilde_list, potential_reward_list, Sigma_e_hat_list, ind_S, pi_nd_list, p_0=0.2, naive=False, x_tilde_test=None):
+    def online_me_adjust_w_predicted_state(self, x_list, x_tilde_list, potential_reward_list, Sigma_e_hat_list, ind_S, pi_nd_list, p_0=0.2, naive=False, x_tilde_test=None, lambda_=1.):
         """Online measurement error adjustment
         
         Args:
@@ -315,7 +387,17 @@ class LinBandit:
         estimation_err_list = np.zeros((T, self.n_action))
         regret_list = np.zeros(T)
         pi_list_test = np.zeros((T, self.n_action))
-        
+        coverage_list = []
+        history = {
+            "x_list": x_list,
+            "x_tilde_list": x_tilde_list,
+            "potential_reward_list": potential_reward_list,
+            "theta_est_list": theta_est_list,
+            "at_list": at_list,
+            "pi_list": pi_list,
+            "pi_list_test": pi_list_test,
+            "coverage_list": coverage_list
+        }
         # Initialize algorithm state
         s_t = -1
         V_t = np.zeros((self.n_action, d, d))
@@ -326,6 +408,8 @@ class LinBandit:
         b_st = np.zeros((self.n_action, d))
         theta_st = np.zeros((self.n_action, d))
         regret = 0
+
+        w_est_cal = weighted_theta_est(args = self.args)
         
         for t in range(T):
             x_tilde_t = x_tilde_list[t,:]
@@ -369,13 +453,19 @@ class LinBandit:
             imp_weight_at = pi_nd_list[t,at] / pi_list[t,at] if not naive else 1.0
             for a in range(self.n_action):
                 if a == at:
-                    V_t[a,:,:] += imp_weight_at * np.outer(x_tilde_t, x_tilde_t)
+                    V_t[a,:,:] += imp_weight_at * (np.outer(x_tilde_t, x_tilde_t) - Sigma_e_hat_list[t,:,:])
+                    # V_t[a,:,:] += imp_weight_at * np.outer(x_tilde_t, x_tilde_t)
                     b_t[a,:] += imp_weight_at * x_tilde_t * rt
                 if not naive:
                     W_t[a,:,:] += pi_nd_list[t,a] * Sigma_e_hat_list[t,:,:]
                 elif a == at:
                     W_t[a,:,:] += Sigma_e_hat_list[t,:,:]
-                    
+            # Compute coverage
+            w_est_cal.update(x_tilde_t, at, rt, pi_list[t,:])
+            if (t+1) % self.coverage_freq == 0:
+                w_theta_est = w_est_cal.get_theta_est().T
+                var_est = estimate_variance(theta_hat = w_theta_est, args = self.args) / (t+1)
+                coverage_list.append(compute_coverage(cur_theta_est = w_theta_est[0, 0], var_est = var_est[0, 0, 0], theta_true = self.theta[0, 0]))
             # Update model if indicated
             if ind_S[t] == 1:
                 s_t = t
@@ -383,7 +473,8 @@ class LinBandit:
                 W_st = W_t.copy()
                 b_st = b_t.copy()
                 for a in range(self.n_action):
-                    theta_st[a,:] = np.matmul(np.linalg.pinv(V_st[a,:,:] - W_st[a,:,:]), b_st[a,:])
+                    # theta_st[a,:] = np.matmul(np.linalg.pinv(V_st[a,:,:] - W_st[a,:,:] + lambda_ * np.eye(d) * t**(1-t/T)), b_st[a,:])
+                    theta_st[a,:] = np.matmul(np.linalg.pinv(V_st[a,:,:] + lambda_ * np.eye(d) * t**(1-t/T)), b_st[a,:])
 
         return {
             "x_list": x_list,
@@ -392,5 +483,6 @@ class LinBandit:
             "theta_est_list": theta_est_list,
             "at_list": at_list,
             "pi_list": pi_list,
-            "pi_list_test": pi_list_test
+            "pi_list_test": pi_list_test,
+            "coverage_list": coverage_list
         }

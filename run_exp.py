@@ -1,6 +1,6 @@
 from linearBandit import LinBandit
 from utility import *
-from context_generator import generate_x_tilde, generate_x_tilde_gaussian, sigma_e, sigma_s, sigma_s_gaussian
+from context_generator import generate_x_tilde, generate_x_tilde_gaussian, sigma_e, sigma_s
 import argparse
 from tqdm import tqdm
 import pickle
@@ -19,7 +19,10 @@ def parse_args():
     parser.add_argument('--d', type=int, default=1, help='Dimension of context vectors')
     parser.add_argument('--sigma_eta', type=float, default=0, help='Noise variance in rewards')
     parser.add_argument('--sigma_e', type=float, default=0.1, help='Measurement error variance')
+    parser.add_argument('--sigma_s', type=float, default=0.1, help='Context variance')
     parser.add_argument('--n_action', type=int, default=2, help='Number of actions')
+    parser.add_argument('--lambda_', type=float, default=0, help='Regularization parameter')
+    parser.add_argument('--coverage_freq', type=int, default=100, help='Frequency of coverage check')
     # Experiment settings
     parser.add_argument('--n_rep', type=int, default=50, help='Number of experiment repetitions')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
@@ -30,6 +33,8 @@ def parse_args():
 args = parse_args()
 print(args)
 
+args.pi_nd = np.ones((args.n_action)) / args.n_action
+
 # setup environment
 if args.env not in ['random', 'failure1', 'failure2']:
     raise ValueError('Invalid environment')
@@ -37,7 +42,7 @@ if args.env not in ['random', 'failure1', 'failure2']:
 if args.env == 'random':
     generate_x_tilde = lambda T: generate_x_tilde_gaussian(T, args.sigma_s, args.sigma_e, args.d)
     args.theta = np.random.normal(0, 1, args.d * args.n_action).reshape((args.d, args.n_action))
-    args.sigma_s = sigma_s_gaussian
+    # args.sigma_s = sigma_s
 elif args.env == 'failure1':
     args.d = 1
     args.n_action = 2
@@ -82,6 +87,7 @@ runMEB = lambda x_list, x_tilde_list, bandit_inst, pwrd: bandit_inst.online_me_a
         pi_nd_list = pi_nd_list, 
         p_0 = args.p0, 
         naive = False, 
+        lambda_ = args.lambda_,
         x_tilde_test = np.array([-1.])
 )
 
@@ -111,15 +117,23 @@ history_dict = {
         "UCB": np.zeros((args.n_rep, args.n_action, args.d)),
         "TS": np.zeros((args.n_rep, args.n_action, args.d)),
         "MEB": np.zeros((args.n_rep, args.n_action, args.d))
+    },
+    "coverage_list": {
+        "UCB": np.zeros((args.n_rep, args.T // args.coverage_freq)),
+        "TS": np.zeros((args.n_rep, args.T // args.coverage_freq)),
+        "MEB": np.zeros((args.n_rep, args.T // args.coverage_freq))
     }
 }
 
 for i in tqdm(range(args.n_rep), desc="Running experiments"):
     x_list, x_tilde_list = generate_x_tilde(args.T)
-    Bandit_1 = LinBandit(theta = args.theta, sigma = args.sigma_eta)
+    if args.env == 'random':
+        args.theta = np.random.normal(0, 1, args.d * args.n_action).reshape((args.d, args.n_action))
+    Bandit_1 = LinBandit(theta = args.theta, sigma = args.sigma_eta, args = args)
     Bandit_info = Bandit_1.generate_potential_reward_w_xtilde(x_list = x_list, x_tilde_list = x_tilde_list)
     
     for alg in alg_dict.keys():
+        # print(f"Running {alg}")
         history = alg_dict[alg](x_list, x_tilde_list, Bandit_1, Bandit_info)
         history_dict['theta_est'][alg][i, :, :, :] = history['theta_est_list']
         history_dict['pi_list'][alg][i, :, :] = history['pi_list_test']
@@ -129,7 +143,11 @@ for i in tqdm(range(args.n_rep), desc="Running experiments"):
             sigma_e = args.sigma_e
         )
         history_dict['theta_est_naive'][alg][i, :, :] = naive_theta_est(history)
-
+        history_dict['coverage_list'][alg][i, :] = np.array(history['coverage_list'])
 # Save history dictionary to a pickle file
-with open(f'{args.save_path}history_dict_{args.env}.pkl', 'wb') as f:
+if args.env == 'random':
+    name = f'{args.save_path}history_dict_random_{args.sigma_s}_{args.sigma_e}.pkl'
+else:
+    name = f'{args.save_path}history_dict_{args.env}.pkl'
+with open(name, 'wb') as f:
     pickle.dump((history_dict, args), f)

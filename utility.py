@@ -1,8 +1,6 @@
-
-
-
 import numpy as np
-from context_generator import generate_x_tilde
+from scipy.stats import norm
+from context_generator import generate_x_tilde, generate_x_tilde_gaussian
 
 ## utility functions
 def prob_clip(x, p_0):
@@ -14,11 +12,22 @@ def prob_clip(x, p_0):
         return(1-p_0)
     return(x)
 
-def estimate_variance(theta_hat, args, n_true = 10000):
+def compute_coverage(cur_theta_est, var_est, theta_true, alpha = 0.05):
+    up_bound = cur_theta_est + np.sqrt(var_est) * norm.ppf(1-alpha/2)
+    lower_bound = cur_theta_est - np.sqrt(var_est) * norm.ppf(1-alpha/2)      
+    cover = 1 if (theta_true < up_bound and theta_true > lower_bound) else 0
+    return(cover)
+
+
+def estimate_variance(theta_hat, args, n_true = 1000):
     ## estimate the asymptotic variance of the weighted estimator
     d = theta_hat.shape[0]
     n_action = theta_hat.shape[1]
-    x_list, x_tilde_list = generate_x_tilde(n_true)
+    if args.env == "random":
+        x_list, x_tilde_list = generate_x_tilde_gaussian(n_true, args.sigma_s, args.sigma_e, d)
+    else:
+        x_list, x_tilde_list = generate_x_tilde(n_true)
+        
     asy_var = np.zeros((n_action, d, d))
     for t in range(n_true):
         x_tilde_t = x_tilde_list[t, :]
@@ -70,7 +79,7 @@ def naive_theta_est(history, n_action = 2):
     return_list = theta_est_batch
     return(return_list)
 
-def weighted_theta_est(history, pi_nd, sigma_e, n_action = 2):
+def weighted_theta_est(history, pi_nd, sigma_e, n_action = 2, stop_t = None):
     ## calculate the weighted estimator for thetas given a bandit history data, with iid potential outcome
     ## history MUST be a dictionary containing the following entries:
     ##         'x_list': list of true underlying context, T*d
@@ -83,11 +92,15 @@ def weighted_theta_est(history, pi_nd, sigma_e, n_action = 2):
     ## Sigma_e: covariance matrix of the measurement error, d * d
     ## OUTPUT: theta_est_batch: weighted estimators of theta with the batch data, n_action * d
 
+    if pi_nd is None:
+        pi_nd = np.ones(n_action) / n_action
     ## extract information
     x_list = history['x_list']
     x_tilde_list = history['x_tilde_list']
     d = x_list.shape[1]
     T = x_list.shape[0]
+    if stop_t is None:
+        stop_t = T
 
     at_list = history['at_list']
     pi_list = history['pi_list']
@@ -98,7 +111,7 @@ def weighted_theta_est(history, pi_nd, sigma_e, n_action = 2):
     Vt = np.zeros((n_action, d)) # Vt[a, :, :] = \sum_t W_t1_{A_t=a} x_tilde_t * Y_t
     t = 0
     
-    while (t<T):
+    while (t<stop_t):
         A_t = int(at_list[t])
         x_tilde_t = x_tilde_list[t, :]
         rt = potential_reward_list[t, A_t]
