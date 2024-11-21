@@ -27,6 +27,7 @@ def parse_args():
     parser.add_argument('--n_rep', type=int, default=50, help='Number of experiment repetitions')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     parser.add_argument('--save_path', type=str, default='./runs/', help='Path to save results')
+    parser.add_argument('--name', type=str, default='', help='Name of the experiment')
     args = parser.parse_args()
     return args
 
@@ -42,6 +43,8 @@ if args.env not in ['random', 'failure1', 'failure2']:
 if args.env == 'random':
     generate_x_tilde = lambda T: generate_x_tilde_gaussian(T, args.sigma_s, args.sigma_e, args.d)
     args.theta = np.random.normal(0, 1, args.d * args.n_action).reshape((args.d, args.n_action))
+    args.theta_all = []
+    # args.theta = []
     # args.sigma_s = sigma_s
 elif args.env == 'failure1':
     args.d = 1
@@ -71,6 +74,12 @@ runTS = lambda x_list, x_tilde_list, bandit_inst, prwd: bandit_inst.TS_w_predict
         potential_reward_list = prwd['potential_reward_list'], 
         rho2 = args.sigma_eta ** 2, l = 1., p_0 = args.p0, 
         x_tilde_test = np.array([-1.]))
+runBoltzmann = lambda x_list, x_tilde_list, bandit_inst, prwd: bandit_inst.Boltzmann_w_predicted_state(
+        x_list = x_list,
+        x_tilde_list = x_tilde_list, 
+        potential_reward_list = prwd['potential_reward_list'], 
+        C = 1.0, l = 1., p_0 = args.p0, 
+        x_tilde_test = np.array([-1.]))
 
 ind_S = (np.arange(args.T) > 100)
 pi_nd_list = 0.5 * np.ones((args.T, args.n_action))
@@ -94,34 +103,40 @@ runMEB = lambda x_list, x_tilde_list, bandit_inst, pwrd: bandit_inst.online_me_a
 alg_dict = {
     'UCB': runUCB,
     'TS': runTS,
-    'MEB': runMEB
+    'MEB': runMEB,
+    'Boltzmann': runBoltzmann
 }
 
 history_dict = {
     "theta_est":{
         "UCB": np.zeros((args.n_rep, args.n_action, args.T, args.d)),
         "TS": np.zeros((args.n_rep, args.n_action, args.T, args.d)),
-        "MEB": np.zeros((args.n_rep, args.n_action, args.T, args.d))
+        "MEB": np.zeros((args.n_rep, args.n_action, args.T, args.d)),
+        "Boltzmann": np.zeros((args.n_rep, args.n_action, args.T, args.d))
     },
     "pi_list":{
         "UCB": np.zeros((args.n_rep, args.T, args.n_action)),
         "TS": np.zeros((args.n_rep, args.T, args.n_action)),
-        "MEB": np.zeros((args.n_rep, args.T, args.n_action))
+        "MEB": np.zeros((args.n_rep, args.T, args.n_action)),
+        "Boltzmann": np.zeros((args.n_rep, args.T, args.n_action))
     },
     "theta_est_batch":{
         "UCB": np.zeros((args.n_rep, args.n_action, args.d)),
         "TS": np.zeros((args.n_rep, args.n_action, args.d)),
-        "MEB": np.zeros((args.n_rep, args.n_action, args.d))
+        "MEB": np.zeros((args.n_rep, args.n_action, args.d)),
+        "Boltzmann": np.zeros((args.n_rep, args.n_action, args.d))
     },
     "theta_est_naive":{
         "UCB": np.zeros((args.n_rep, args.n_action, args.d)),
         "TS": np.zeros((args.n_rep, args.n_action, args.d)),
-        "MEB": np.zeros((args.n_rep, args.n_action, args.d))
+        "MEB": np.zeros((args.n_rep, args.n_action, args.d)),
+        "Boltzmann": np.zeros((args.n_rep, args.n_action, args.d))
     },
     "coverage_list": {
         "UCB": np.zeros((args.n_rep, args.T // args.coverage_freq)),
         "TS": np.zeros((args.n_rep, args.T // args.coverage_freq)),
-        "MEB": np.zeros((args.n_rep, args.T // args.coverage_freq))
+        "MEB": np.zeros((args.n_rep, args.T // args.coverage_freq)),
+        "Boltzmann": np.zeros((args.n_rep, args.T // args.coverage_freq))
     }
 }
 
@@ -129,6 +144,8 @@ for i in tqdm(range(args.n_rep), desc="Running experiments"):
     x_list, x_tilde_list = generate_x_tilde(args.T)
     if args.env == 'random':
         args.theta = np.random.normal(0, 1, args.d * args.n_action).reshape((args.d, args.n_action))
+        args.theta_all.append(args.theta)
+
     Bandit_1 = LinBandit(theta = args.theta, sigma = args.sigma_eta, args = args)
     Bandit_info = Bandit_1.generate_potential_reward_w_xtilde(x_list = x_list, x_tilde_list = x_tilde_list)
     
@@ -146,8 +163,8 @@ for i in tqdm(range(args.n_rep), desc="Running experiments"):
         history_dict['coverage_list'][alg][i, :] = np.array(history['coverage_list'])
 # Save history dictionary to a pickle file
 if args.env == 'random':
-    name = f'{args.save_path}history_dict_random_{args.sigma_s}_{args.sigma_e}.pkl'
+    name = f'{args.save_path}history_dict_random_{args.sigma_s}_{args.sigma_e}_{args.name}.pkl'
 else:
-    name = f'{args.save_path}history_dict_{args.env}.pkl'
+    name = f'{args.save_path}history_dict_{args.env}_{args.name}.pkl'
 with open(name, 'wb') as f:
     pickle.dump((history_dict, args), f)

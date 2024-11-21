@@ -1,6 +1,7 @@
-import numpy as np
+
 import scipy.stats as stats
-from utility import prob_clip, compute_coverage, weighted_theta_est, estimate_variance
+import numpy as np
+from utility import prob_clip, compute_coverage, weighted_theta_est, estimate_variance, softmax
 
 
 class weighted_theta_est:
@@ -223,6 +224,126 @@ class LinBandit:
             bt[at,:] += x_tilde_t * rt
 
             self.w_est_cal.update(x_tilde_t, at, rt, pi_list[t,:])
+            # Compute coverage
+            if (t+1) % self.coverage_freq == 0:
+                w_theta_est = self.w_est_cal.get_theta_est().T
+                var_est = estimate_variance(theta_hat = theta_est_list[:, t, :].T, args = self.args) / (t+1)
+                coverage_list.append(compute_coverage(cur_theta_est = w_theta_est[0, 0], var_est = var_est[0, 0, 0], theta_true = self.theta[0, 0]))
+
+        return {
+            "x_list": x_list,
+            "x_tilde_list": x_tilde_list,
+            "potential_reward_list": potential_reward_list,
+            "theta_est_list": theta_est_list,
+            "at_list": at_list,
+            "pi_list": pi_list,
+            "pi_list_test": pi_list_test,
+            "coverage_list": coverage_list
+        }
+
+
+    def Boltzmann_w_predicted_state(self, x_list, x_tilde_list, potential_reward_list, C, l=1., p_0=0.2, x_tilde_test=None):
+        """Boltzmann with predicted states
+        
+        Args:
+            x_list: Context list (T x d)
+            x_tilde_list: Predicted context list (T x d)
+            potential_reward_list: Potential rewards (T x n_action)
+            at_dag_list: Oracle actions (T)
+            C: UCB confidence width parameter
+            l: Ridge regression parameter
+            p_0: Minimum selection probability
+            x_tilde_test: Test context for policy evaluation
+            
+        Returns:
+            Dictionary containing history and results
+        """
+        if self.n_action != 2:
+            return None
+            
+        T = x_list.shape[0]
+        d = self.dim
+
+        self.w_est_cal = weighted_theta_est(args = self.args)
+        
+        # Initialize tracking variables
+        theta_est_list = np.zeros((self.n_action, T, d))
+        pi_list = np.zeros((T, self.n_action))
+        at_list = np.zeros(T)
+        estimation_err_list = np.zeros((T, self.n_action))
+        regret_list = np.zeros(T)
+        pi_list_test = np.zeros((T, self.n_action))
+        coverage_list = []
+        history = {
+            "x_list": x_list,
+            "x_tilde_list": x_tilde_list,
+            "potential_reward_list": potential_reward_list,
+            "theta_est_list": theta_est_list,
+            "at_list": at_list,
+            "pi_list": pi_list,
+            "pi_list_test": pi_list_test,
+            "coverage_list": coverage_list
+        }
+        # Initialize algorithm state
+        regret = 0
+        Vt = np.zeros((self.n_action, d, d))
+        bt = np.zeros((self.n_action, d))
+        for a in range(self.n_action):
+            Vt[a,:,:] = l * np.eye(d)
+            
+        for t in range(T):
+            x_tilde_t = x_tilde_list[t,:]
+            x_t = x_list[t,:]
+            
+            # Compute UCBs for each action
+            UCB_list = np.zeros(self.n_action)
+            for a in range(self.n_action):
+                theta_a_hat = np.matmul(np.linalg.inv(Vt[a,:,:]), bt[a,:])
+                mu_a = np.dot(theta_a_hat, x_tilde_t)
+                sigma_a2 = np.dot(x_tilde_t, np.matmul(np.linalg.inv(Vt[a,:,:]), x_tilde_t))
+                UCB_list[a] = mu_a # + C * np.sqrt(sigma_a2)
+                theta_est_list[a,t,:] = theta_a_hat
+                estimation_err_list[t,a] = np.linalg.norm(theta_a_hat - self.theta[:,a])
+                
+            at_boltzmann = softmax(UCB_list)
+            
+            # Set policy probabilities
+            # for a in range(self.n_action):
+            #     pi_list[t,a] = 1 - (self.n_action-1)*p_0 if a == at_ucb else p_0
+            pi_list[t,:] = at_boltzmann
+                
+            # Evaluate test policy if requested
+            if x_tilde_test is not None:
+                UCB_list_test = np.zeros(self.n_action)
+                for a in range(self.n_action):
+                    theta_a_hat = np.matmul(np.linalg.inv(Vt[a,:,:]), bt[a,:])
+                    mu_a_test = np.dot(theta_a_hat, x_tilde_test)
+                    sigma_a2_test = np.dot(x_tilde_test, np.matmul(np.linalg.inv(Vt[a,:,:]), x_tilde_test))
+                    UCB_list_test[a] = mu_a_test + C * np.sqrt(sigma_a2_test)
+                at_boltzmann_test = softmax(UCB_list_test)
+                pi_list_test[t,:] = at_boltzmann_test
+            
+            # Compute regret
+            if np.dot(x_t, self.theta[:,0]) > np.dot(x_t, self.theta[:,1]):
+                reward_oracle_t = np.dot(x_t, self.theta[:,0]) * (1-p_0) + np.dot(x_t, self.theta[:,1]) * p_0
+            else:
+                reward_oracle_t = np.dot(x_t, self.theta[:,1]) * (1-p_0) + np.dot(x_t, self.theta[:,0]) * p_0
+            reward_policy = np.dot(x_t, self.theta[:,0]) * pi_list[t,0] + np.dot(x_t, self.theta[:,1]) * pi_list[t,1]
+            regret_t = reward_oracle_t - reward_policy
+            regret += regret_t
+            regret_list[t] = regret
+            
+            # Take action and observe reward
+            at = np.random.binomial(1, pi_list[t,1])
+            at_list[t] = at
+            rt = potential_reward_list[t,at]
+
+            self.w_est_cal.update(x_tilde_t, at, rt, pi_list[t,:])
+            
+            # Update sufficient statistics
+            Vt[at,:,:] += np.outer(x_tilde_t, x_tilde_t)
+            bt[at,:] += x_tilde_t * rt
+
             # Compute coverage
             if (t+1) % self.coverage_freq == 0:
                 w_theta_est = self.w_est_cal.get_theta_est().T

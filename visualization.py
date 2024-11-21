@@ -19,7 +19,7 @@ with open('./runs/history_dict_failure1.pkl', 'rb') as f:
 
 print(args)
 
-algorithms = ['UCB', 'TS', 'MEB']
+algorithms = ['UCB', 'TS', 'MEB', 'Boltzmann']
 
 def plot_coverage(history_dict, args, save = None):
     fig, axs = plt.subplots(3, 1, figsize=(5, 7.5))
@@ -102,29 +102,36 @@ def boxplot_coverage(history_dict, args, save = None):
     for i_algorithm, algorithm in enumerate(algorithms):
         for i_rep in range(args.n_rep):
             # use last time estimate
-            theta_hat = history_dict['theta_est'][algorithm][i_rep, :, -1, :].reshape((args.d, args.n_action))
+            theta_hat = history_dict['theta_est'][algorithm][i_rep, :, -1, :].T
             variance = estimate_variance(theta_hat = theta_hat, args = args, n_true = 1000)
             variance = variance/args.T
             theta_est_batch = history_dict['theta_est_batch'][algorithm][i_rep, 0, 0]
 
             up_bound = theta_est_batch + np.sqrt(variance[0, 0, 0]) * norm.ppf(1-0.05/2)
             lower_bound = theta_est_batch - np.sqrt(variance[0, 0, 0]) * norm.ppf(1-0.05/2)            
-            cover = compute_coverage(cur_theta_est = theta_est_batch, var_est = variance[0,0, 0], theta_true = args.theta[0, 0], alpha = 0.05)  
-            data[algorithm].append(int(cover))
+            # cover = compute_coverage(cur_theta_est = theta_est_batch, var_est = variance[0,0, 0], theta_true = args.theta[0, 0], alpha = 0.05)  
+            if args.theta_all is not None:
+                cover = int(up_bound > args.theta_all[i_rep][0, 0] and lower_bound < args.theta_all[i_rep][0, 0])
+            else:
+                cover = int(up_bound > args.theta[0, 0] and lower_bound < args.theta[0, 0])
+            data[algorithm].append(cover)
     fig, ax = plt.subplots(figsize=(5, 3))
     # ax.boxplot(list(data.values()), labels=algorithms)
     means = [np.mean(data[alg]) for alg in algorithms]
     stds = [np.std(data[alg])/np.sqrt(args.n_rep) for alg in algorithms]
     
     # Plot bars with error bars
-    ax.scatter(range(len(algorithms)), means, color=PAPER_BLUE, alpha=0.2)
-    ax.errorbar(range(len(algorithms)), means, yerr=stds, fmt='o', color=PAPER_BLUE, alpha=0.2)
+    ax.scatter(range(len(algorithms)), means, color=PAPER_BLUE, alpha=1)
+    ax.errorbar(range(len(algorithms)), means, yerr=stds, fmt='o', color=PAPER_BLUE, alpha=1)
     ax.hlines(0.95, -0.5, 2.5, color='red', linestyle='--')
     ax.set_xticks(range(len(algorithms)))
     ax.set_xticklabels(algorithms)
-    ax.set_ylabel('Coverage')
-    ax.set_title('Coverage of confidence intervals')
-    plt.show()
+    # ax.set_ylabel('Coverage')
+    ax.set_title('Coverage rate of 95% confidence intervals')
+    if save is not None:
+        plt.savefig(save)
+    else:
+        plt.show()
 
 def plot_batch_est(history_dict, args, draw_a = 0, save = None):
     # if args.env == 'random':
@@ -149,10 +156,14 @@ def plot_batch_est(history_dict, args, draw_a = 0, save = None):
         gaussian = 1/np.sqrt(2*variance[draw_a, 0, 0]*np.pi) * np.exp(-(x-true_theta)**2/2/variance[draw_a, 0, 0])
         axes[i_algorithm].plot(x, gaussian, color='green', linestyle=':', label='N(3,1)')
         axes[i_algorithm].set_title(f'{algorithm}')
+        axes[i_algorithm].set_ylim(0, 3.5)
         # axes[i_algorithm].legend()
     plt.suptitle('Density plot of weighted estimators')
     plt.tight_layout()
-    plt.show()
+    if save is not None:
+        plt.savefig(save)
+    else:
+        plt.show()
 
 def plot_naive_est(history_dict, args, draw_a = 0, save = None):
     if args.env == 'random':

@@ -12,6 +12,9 @@ def prob_clip(x, p_0):
         return(1-p_0)
     return(x)
 
+def softmax(x):
+    return(np.exp(x) / np.sum(np.exp(x)))
+
 def compute_coverage(cur_theta_est, var_est, theta_true, alpha = 0.05):
     up_bound = cur_theta_est + np.sqrt(var_est) * norm.ppf(1-alpha/2)
     lower_bound = cur_theta_est - np.sqrt(var_est) * norm.ppf(1-alpha/2)      
