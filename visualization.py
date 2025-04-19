@@ -21,8 +21,10 @@ print(args)
 
 algorithms = ['UCB', 'TS', 'MEB', 'Boltzmann']
 
+n_plot = len(algorithms)
+
 def plot_coverage(history_dict, args, save = None):
-    fig, axs = plt.subplots(3, 1, figsize=(5, 7.5))
+    fig, axs = plt.subplots(n_plot, 1, figsize=(5, 7.5))
     coverage_freq = args.coverage_freq
     for i_algorithm, algorithm in enumerate(algorithms):
         axs[i_algorithm].plot(np.arange(1, args.T, coverage_freq), np.mean(history_dict['coverage_list'][algorithm], axis=0), color=PAPER_BLUE)
@@ -44,7 +46,7 @@ def plot_coverage(history_dict, args, save = None):
 
 def plot_theta_est(history_dict, args, diff=False, save = None, subsample = 100):
     if not diff:
-        fig, axs = plt.subplots(3, 1, figsize=(5, 7.5))
+        fig, axs = plt.subplots(n_plot, 1, figsize=(5, 7.5))
         for i_algorithm, algorithm in enumerate(algorithms):
             for i_experiment in range(args.n_rep):
                 t_range = np.arange(1, args.T+1, subsample)
@@ -65,7 +67,7 @@ def plot_theta_est(history_dict, args, diff=False, save = None, subsample = 100)
         else:
             plt.show()
     else:
-        fig, axs = plt.subplots(3, 1, figsize=(5, 7.5))
+        fig, axs = plt.subplots(n_plot, 1, figsize=(5, 7.5))
         for i_algorithm, algorithm in enumerate(algorithms):
             theta_est_diff = np.mean(history_dict['theta_est'][algorithm][:, 0, :, 0] - history_dict['theta_est'][algorithm][:, 1, :, 0], axis=0)
             axs[i_algorithm].plot(np.arange(1, args.T+1), theta_est_diff, color=PAPER_BLUE)
@@ -80,7 +82,7 @@ def plot_theta_est(history_dict, args, diff=False, save = None, subsample = 100)
         plt.show()
 
 def plot_pi_list(history_dict, args, save = None):
-    fig, axs = plt.subplots(3, 1, figsize=(5, 7.5))
+    fig, axs = plt.subplots(n_plot, 1, figsize=(5, 7.5))
     for i_algorithm, algorithm in enumerate(algorithms):
         means_pi0 = np.mean(history_dict['pi_list'][algorithm][:, :, 0], axis=0)
         ses_pi0 = np.std(history_dict['pi_list'][algorithm][:, :, 0], axis=0)
@@ -136,7 +138,7 @@ def boxplot_coverage(history_dict, args, save = None):
 def plot_batch_est(history_dict, args, draw_a = 0, save = None):
     # if args.env == 'random':
     #     raise ValueError('Is not implemented for random environment')
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+    fig, axes = plt.subplots(1, n_plot, figsize=(12, 4))
 
     # First subplot: density plot for UCB batch estimates
     for i_algorithm, algorithm in enumerate(algorithms):
@@ -168,7 +170,7 @@ def plot_batch_est(history_dict, args, draw_a = 0, save = None):
 def plot_naive_est(history_dict, args, draw_a = 0, save = None):
     if args.env == 'random':
         raise ValueError('Is not implemented for random environment')
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+    fig, axes = plt.subplots(1, n_plot, figsize=(12, 4))
 
     # First subplot: density plot for UCB batch estimates
     for i_algorithm, algorithm in enumerate(algorithms):

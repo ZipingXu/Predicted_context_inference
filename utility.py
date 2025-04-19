@@ -12,8 +12,8 @@ def prob_clip(x, p_0):
         return(1-p_0)
     return(x)
 
-def softmax(x):
-    return(np.exp(x) / np.sum(np.exp(x)))
+def softmax(x, gamma = 10):
+    return(np.exp(x * gamma) / np.sum(np.exp(x * gamma)))
 
 def compute_coverage(cur_theta_est, var_est, theta_true, alpha = 0.05):
     up_bound = cur_theta_est + np.sqrt(var_est) * norm.ppf(1-alpha/2)
@@ -22,7 +22,7 @@ def compute_coverage(cur_theta_est, var_est, theta_true, alpha = 0.05):
     return(cover)
 
 
-def estimate_variance(theta_hat, args, n_true = 1000):
+def estimate_variance(theta_hat, args, n_true = 1000, if_softmax = False):
     ## estimate the asymptotic variance of the weighted estimator
     d = theta_hat.shape[0]
     n_action = theta_hat.shape[1]
@@ -32,12 +32,16 @@ def estimate_variance(theta_hat, args, n_true = 1000):
         x_list, x_tilde_list = generate_x_tilde(n_true)
         
     asy_var = np.zeros((n_action, d, d))
+
     for t in range(n_true):
         x_tilde_t = x_tilde_list[t, :]
         x_t = x_list[t, :]
         max_r = np.max(x_tilde_t * theta_hat)
         for a in range(n_action):
-            tmp_a = (1-args.p0) if x_tilde_t * theta_hat[0, a] == max_r else args.p0 / (n_action - 1)
+            if if_softmax:
+                tmp_a = softmax(x_tilde_t * theta_hat[0, :], gamma = 3)[a]
+            else:
+                tmp_a = (1-args.p0) if x_tilde_t * theta_hat[0, a] == max_r else args.p0 / (n_action - 1)
             ha_t = (x_tilde_t.reshape((d, 1)) @ x_tilde_t.reshape((1, d)) - args.sigma_e) @ theta_hat[:, a] - x_tilde_t.reshape((d, 1)) @ x_t.reshape((1, d)) @ theta_hat[:, a]
             asy_var[a, :, :] += 1 / tmp_a * (ha_t.reshape((d, 1)) @ ha_t.reshape((1, d)) + args.sigma_eta * x_tilde_t.reshape((d, 1)) @ x_tilde_t.reshape((1, d)))
     # for a in range(n_action):

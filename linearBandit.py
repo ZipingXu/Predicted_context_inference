@@ -242,7 +242,7 @@ class LinBandit:
         }
 
 
-    def Boltzmann_w_predicted_state(self, x_list, x_tilde_list, potential_reward_list, C, l=1., p_0=0.2, x_tilde_test=None):
+    def Boltzmann_w_predicted_state(self, x_list, x_tilde_list, potential_reward_list, C, gamma = 3, l=1., p_0=0.2, x_tilde_test=None):
         """Boltzmann with predicted states
         
         Args:
@@ -305,7 +305,7 @@ class LinBandit:
                 theta_est_list[a,t,:] = theta_a_hat
                 estimation_err_list[t,a] = np.linalg.norm(theta_a_hat - self.theta[:,a])
                 
-            at_boltzmann = softmax(UCB_list)
+            at_boltzmann = softmax(UCB_list, gamma)
             
             # Set policy probabilities
             # for a in range(self.n_action):
@@ -320,7 +320,7 @@ class LinBandit:
                     mu_a_test = np.dot(theta_a_hat, x_tilde_test)
                     sigma_a2_test = np.dot(x_tilde_test, np.matmul(np.linalg.inv(Vt[a,:,:]), x_tilde_test))
                     UCB_list_test[a] = mu_a_test + C * np.sqrt(sigma_a2_test)
-                at_boltzmann_test = softmax(UCB_list_test)
+                at_boltzmann_test = softmax(UCB_list_test, gamma)
                 pi_list_test[t,:] = at_boltzmann_test
             
             # Compute regret
@@ -347,7 +347,7 @@ class LinBandit:
             # Compute coverage
             if (t+1) % self.coverage_freq == 0:
                 w_theta_est = self.w_est_cal.get_theta_est().T
-                var_est = estimate_variance(theta_hat = theta_est_list[:, t, :].T, args = self.args) / (t+1)
+                var_est = estimate_variance(theta_hat = theta_est_list[:, t, :].T, args = self.args, if_softmax = True) / (t+1)
                 coverage_list.append(compute_coverage(cur_theta_est = w_theta_est[0, 0], var_est = var_est[0, 0, 0], theta_true = self.theta[0, 0]))
 
         return {
