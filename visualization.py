@@ -24,35 +24,44 @@ algorithms = ['UCB', 'TS', 'MEB', 'Boltzmann', 'Random']
 n_plot = len(algorithms)
 
 def plot_coverage(history_dict, args, save = None):
-    fig, axs = plt.subplots(n_plot, 1, figsize=(5, 7.5))
+    fig, ax = plt.subplots(figsize=(8, 5))
     coverage_freq = args.coverage_freq
+    
+    # Define a color palette for the algorithms
+    colors = plt.cm.Set2(np.linspace(0, 1, len(algorithms)))
+    
     for i_algorithm, algorithm in enumerate(algorithms):
-        # print(algorithm)
-        axs[i_algorithm].plot(np.arange(1, args.T, coverage_freq), np.mean(history_dict['coverage_list'][algorithm], axis=0), color=PAPER_BLUE)
         means_coverage = np.mean(history_dict['coverage_list'][algorithm], axis=0)
         ses_coverage = np.std(history_dict['coverage_list'][algorithm], axis=0) / np.sqrt(args.n_rep)
-        axs[i_algorithm].fill_between(np.arange(1, args.T, coverage_freq), means_coverage - ses_coverage, means_coverage + ses_coverage, color=PAPER_BLUE, alpha=0.1)
-        axs[i_algorithm].set_title(f'Coverage of $\\theta$ of {algorithm}')
-        axs[i_algorithm].set_xlabel('T')
-        axs[i_algorithm].set_ylabel('Coverage')
-        # axs[i_algorithm].set_ylim(0., 1)
-        axs[i_algorithm].set_ylim(0.8, 1)
-        # axs[i_algorithm].set_xlim(0, 100)
-        axs[i_algorithm].axhline(y=0.95, color='red', linestyle='--')
+        
+        ax.plot(np.arange(1, args.T, coverage_freq), means_coverage, 
+                color=colors[i_algorithm], label=algorithm)
+        ax.fill_between(np.arange(1, args.T, coverage_freq), 
+                       means_coverage - ses_coverage, 
+                       means_coverage + ses_coverage, 
+                       color=colors[i_algorithm], alpha=0.1)
+    
+    ax.set_title('Coverage of $\\theta$ across Algorithms')
+    ax.set_xlabel('T')
+    ax.set_ylabel('Coverage')
+    # ax.set_ylim(0.8, 1)
+    ax.axhline(y=0.95, color='red', linestyle='--', label='Target Coverage')
+    ax.legend()
+    
     plt.tight_layout()
     if save is not None:
         plt.savefig(save)
     else:
         plt.show()
 
-def plot_theta_est(history_dict, args, diff=False, save = None, subsample = 100):
+def plot_theta_est(history_dict, args, diff=False, save = None):
     if not diff:
         fig, axs = plt.subplots(n_plot, 1, figsize=(5, 7.5))
         for i_algorithm, algorithm in enumerate(algorithms):
-            for i_experiment in range(args.n_rep):
-                t_range = np.arange(1, args.T+1, subsample)
-                axs[i_algorithm].plot(t_range, history_dict['theta_est'][algorithm][i_experiment, 0, ::subsample, 0], color=PAPER_BLUE, alpha=0.2)
-                axs[i_algorithm].plot(t_range, history_dict['theta_est'][algorithm][i_experiment, 1, ::subsample, 0], color=PAPER_RED, alpha=0.2)
+            for i_experiment in range(min(args.n_rep, 20)):
+                t_range = np.arange(1, args.T+1, args.coverage_freq)
+                axs[i_algorithm].plot(t_range, history_dict['theta_est'][algorithm][i_experiment, 0, :, 0], color=PAPER_BLUE, alpha=0.2)
+                axs[i_algorithm].plot(t_range, history_dict['theta_est'][algorithm][i_experiment, 1, :, 0], color=PAPER_RED, alpha=0.2)
             axs[i_algorithm].set_title(f'Estimated $\\theta$ of {algorithm}')
             legend = ['action 0', 'action 1']
             axs[i_algorithm].legend(legend)
@@ -71,7 +80,7 @@ def plot_theta_est(history_dict, args, diff=False, save = None, subsample = 100)
         fig, axs = plt.subplots(n_plot, 1, figsize=(5, 7.5))
         for i_algorithm, algorithm in enumerate(algorithms):
             theta_est_diff = np.mean(history_dict['theta_est'][algorithm][:, 0, :, 0] - history_dict['theta_est'][algorithm][:, 1, :, 0], axis=0)
-            axs[i_algorithm].plot(np.arange(1, args.T+1), theta_est_diff, color=PAPER_BLUE)
+            axs[i_algorithm].plot(np.arange(1, args.T+1, args.coverage_freq), theta_est_diff, color=PAPER_BLUE)
             axs[i_algorithm].set_title(f'Difference in theta of {algorithm}')
             axs[i_algorithm].set_xlabel('T')
             axs[i_algorithm].set_ylabel('Difference in theta')
@@ -87,8 +96,8 @@ def plot_pi_list(history_dict, args, save = None):
     for i_algorithm, algorithm in enumerate(algorithms):
         means_pi0 = np.mean(history_dict['pi_list'][algorithm][:, :, 0], axis=0)
         ses_pi0 = np.std(history_dict['pi_list'][algorithm][:, :, 0], axis=0)
-        axs[i_algorithm].plot(np.arange(1, args.T+1), means_pi0, color=PAPER_BLUE, alpha=0.6)
-        axs[i_algorithm].fill_between(np.arange(1, args.T+1), means_pi0 - ses_pi0, means_pi0 + ses_pi0, color=PAPER_BLUE, alpha=0.1)
+        axs[i_algorithm].plot(np.arange(1, args.T+1, args.coverage_freq), means_pi0, color=PAPER_BLUE, alpha=0.6)
+        axs[i_algorithm].fill_between(np.arange(1, args.T+1, args.coverage_freq), means_pi0 - ses_pi0, means_pi0 + ses_pi0, color=PAPER_BLUE, alpha=0.1)
         axs[i_algorithm].set_title(f'Sampling probability of {algorithm} at x=-1')
         axs[i_algorithm].set_xlabel('T')
         # axs[i_algorithm].set_ylabel('Sampling probability')
@@ -151,14 +160,8 @@ def plot_batch_est(history_dict, args, draw_a = 0, save = None):
         axes[i_algorithm].axvline(x=true_theta, color=PAPER_RED, linestyle='--')
 
         # predicted
-        theta_hat = history_dict['theta_est'][algorithm][0, :, -1, :].reshape((args.d, args.n_action))
-        # print(theta_hat)
-        if algorithm == 'Random':
-            variance = estimate_variance(theta_hat = theta_hat, w_theta_est = w_theta_est, args = args, n_true = 10000, p0 = (1-1/args.n_action))
-        elif algorithm == 'Boltzmann':
-            variance = estimate_variance(theta_hat = theta_hat, w_theta_est = w_theta_est, args = args, n_true = 10000, if_softmax = True)
-        else:   
-            variance = estimate_variance(theta_hat = theta_hat, w_theta_est = w_theta_est, args = args, n_true = 10000)
+        policy_func = history_dict['policy_func'][algorithm][0, :]
+        variance = estimate_variance(policy_func = policy_func, w_theta_est = w_theta_est, args = args, n_true = 10000)
         variance = variance/args.T
         # print(algorithm, variance)
         x = np.linspace(true_theta-0.5,true_theta+0.5,1000)

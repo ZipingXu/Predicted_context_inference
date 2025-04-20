@@ -61,18 +61,18 @@ elif args.env == 'failure2':
     args.theta = np.array([-3, -1]).reshape((args.d, args.n_action))
 
 # Define algorithm runners with updated parameter lists
-runUCB = lambda bandit_inst: bandit_inst.UCB(
-        C = 1.0, l = 1., p_0 = args.p0, 
+runUCB = lambda bandit_inst: bandit_inst.run_bandit(
+        policy='ucb', 
         x_tilde_test = np.array([-1.])
 )
-runTS = lambda bandit_inst: bandit_inst.TS(
-        rho2 = args.sigma_eta ** 2, l = 1., p_0 = args.p0, 
+runTS = lambda bandit_inst: bandit_inst.run_bandit(
+        policy='ts',
         x_tilde_test = np.array([-1.]))
-runBoltzmann = lambda bandit_inst: bandit_inst.Boltzmann(
-        gamma = args.gamma, l = 1., p_0 = args.p0, 
+runBoltzmann = lambda bandit_inst: bandit_inst.run_bandit(
+        policy='boltzmann', 
         x_tilde_test = np.array([-1.]))
-runRandom = lambda bandit_inst: bandit_inst.random_policy(
-        p_0 = args.p0,
+runRandom = lambda bandit_inst: bandit_inst.run_bandit(
+        policy='random',
         x_tilde_test = np.array([-1.]))
 
 # Prepare data for MEB algorithm
@@ -83,11 +83,10 @@ Sigma_e_hat_list = np.zeros((args.T, args.d, args.d))
 for t in range(args.T):
     Sigma_e_hat_list[t, :, :] = args.sigma_e * np.eye(args.d)
     
-runMEB = lambda bandit_inst: bandit_inst.MEB(
-        Sigma_e_hat_list = Sigma_e_hat_list,
+runMEB = lambda bandit_inst: bandit_inst.run_bandit(
+        policy='meb',
         ind_S = ind_S, 
         pi_nd_list = pi_nd_list, 
-        p_0 = args.p0, 
         naive = False, 
         lambda_ = args.lambda_,
         x_tilde_test = np.array([-1.])
@@ -107,7 +106,8 @@ history_dict = {
     "pi_list": {},
     "theta_est_batch": {},
     "theta_est_naive": {},
-    "coverage_list": {}
+    "coverage_list": {},
+    "policy_func": {}
 }
 
 # Define algorithms
@@ -115,12 +115,12 @@ algorithms = ["UCB", "TS", "MEB", "Boltzmann", "Random"]
 
 # Initialize arrays for each algorithm
 for alg in algorithms:
-    history_dict["theta_est"][alg] = np.zeros((args.n_rep, args.n_action, args.T, args.d))
-    history_dict["pi_list"][alg] = np.zeros((args.n_rep, args.T, args.n_action))
+    history_dict["theta_est"][alg] = np.zeros((args.n_rep, args.n_action, args.T // args.coverage_freq, args.d))
+    history_dict["pi_list"][alg] = np.zeros((args.n_rep, args.T // args.coverage_freq, args.n_action))
     history_dict["theta_est_batch"][alg] = np.zeros((args.n_rep, args.n_action, args.d))
     history_dict["theta_est_naive"][alg] = np.zeros((args.n_rep, args.n_action, args.d))
     history_dict["coverage_list"][alg] = np.zeros((args.n_rep, args.T // args.coverage_freq))
-
+    history_dict["policy_func"][alg] = []
 for i in tqdm(range(args.n_rep), desc="Running experiments"):
     # Generate contexts
     x_list, x_tilde_list = generate_x_tilde(args.T)
@@ -137,9 +137,11 @@ for i in tqdm(range(args.n_rep), desc="Running experiments"):
         result_dict = alg_dict[alg](Bandit_1)
         
         # Store results in history dictionary
-        history_dict['theta_est'][alg][i, :, :, :] = result_dict['theta_est_list']
-        history_dict['pi_list'][alg][i, :, :] = result_dict['pi_list_test']
-        history_dict['coverage_list'][alg][i, :] = np.array(result_dict['coverage_list'])
+        # Subsample theta_est_list to match coverage frequency
+        history_dict['theta_est'][alg][i, :, :, :] = result_dict['theta_est_list'][:, ::args.coverage_freq, :]
+        history_dict['pi_list'][alg][i, :, :] = result_dict['pi_list_test'][::args.coverage_freq, :]
+        history_dict['coverage_list'][alg][i, :] = np.array(result_dict['coverage_list'])[::args.coverage_freq]
+        history_dict['policy_func'][alg].append(result_dict['policy_func'])
         
         # Calculate and store weighted and naive theta estimates
         history_dict['theta_est_batch'][alg][i, :, :] = weighted_theta_est(
