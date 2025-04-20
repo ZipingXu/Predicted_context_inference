@@ -19,7 +19,7 @@ with open('./runs/history_dict_failure1.pkl', 'rb') as f:
 
 print(args)
 
-algorithms = ['UCB', 'TS', 'MEB', 'Boltzmann']
+algorithms = ['UCB', 'TS', 'MEB', 'Boltzmann', 'Random']
 
 n_plot = len(algorithms)
 
@@ -27,6 +27,7 @@ def plot_coverage(history_dict, args, save = None):
     fig, axs = plt.subplots(n_plot, 1, figsize=(5, 7.5))
     coverage_freq = args.coverage_freq
     for i_algorithm, algorithm in enumerate(algorithms):
+        # print(algorithm)
         axs[i_algorithm].plot(np.arange(1, args.T, coverage_freq), np.mean(history_dict['coverage_list'][algorithm], axis=0), color=PAPER_BLUE)
         means_coverage = np.mean(history_dict['coverage_list'][algorithm], axis=0)
         ses_coverage = np.std(history_dict['coverage_list'][algorithm], axis=0) / np.sqrt(args.n_rep)
@@ -34,8 +35,8 @@ def plot_coverage(history_dict, args, save = None):
         axs[i_algorithm].set_title(f'Coverage of $\\theta$ of {algorithm}')
         axs[i_algorithm].set_xlabel('T')
         axs[i_algorithm].set_ylabel('Coverage')
-        # axs[i_algorithm].set_ylim(0.4, 1)
-        axs[i_algorithm].set_ylim(0, 1)
+        # axs[i_algorithm].set_ylim(0., 1)
+        axs[i_algorithm].set_ylim(0.8, 1)
         # axs[i_algorithm].set_xlim(0, 100)
         axs[i_algorithm].axhline(y=0.95, color='red', linestyle='--')
     plt.tight_layout()
@@ -56,8 +57,8 @@ def plot_theta_est(history_dict, args, diff=False, save = None, subsample = 100)
             legend = ['action 0', 'action 1']
             axs[i_algorithm].legend(legend)
             axs[i_algorithm].set_xlabel('T')
-            axs[i_algorithm].axhline(y=args.theta[0,0], color="blue", linestyle='--')
-            axs[i_algorithm].axhline(y=args.theta[0,1], color="red", linestyle='--')
+            # axs[i_algorithm].axhline(y=args.theta[0,0], color="blue", linestyle='--')
+            # axs[i_algorithm].axhline(y=args.theta[0,1], color="red", linestyle='--')
             # axs[i_algorithm].set_ylim(0.2, 0.3)
             if algorithm == 'MEB':
                 axs[i_algorithm].set_ylim(min(args.theta[0,0], args.theta[0,1])-1, max(args.theta[0,0], args.theta[0,1])+1)
@@ -143,15 +144,21 @@ def plot_batch_est(history_dict, args, draw_a = 0, save = None):
     # First subplot: density plot for UCB batch estimates
     for i_algorithm, algorithm in enumerate(algorithms):
         theta_est_batch = history_dict['theta_est_batch'][algorithm][:, draw_a, 0]
+        w_theta_est = history_dict['theta_est_batch'][algorithm][-1, :, :].transpose(1, 0)
         true_theta = args.theta[0, draw_a]
         sns.kdeplot(theta_est_batch, color=PAPER_BLUE, ax=axes[i_algorithm])
         # Add vertical line at x=-3
         axes[i_algorithm].axvline(x=true_theta, color=PAPER_RED, linestyle='--')
 
         # predicted
-        theta_hat = np.mean(history_dict['theta_est'][algorithm][:, :, -1, :], axis=0).reshape((args.d, args.n_action))
+        theta_hat = history_dict['theta_est'][algorithm][0, :, -1, :].reshape((args.d, args.n_action))
         # print(theta_hat)
-        variance = estimate_variance(theta_hat = theta_hat, args = args, n_true = 10000)
+        if algorithm == 'Random':
+            variance = estimate_variance(theta_hat = theta_hat, w_theta_est = w_theta_est, args = args, n_true = 10000, p0 = (1-1/args.n_action))
+        elif algorithm == 'Boltzmann':
+            variance = estimate_variance(theta_hat = theta_hat, w_theta_est = w_theta_est, args = args, n_true = 10000, if_softmax = True)
+        else:   
+            variance = estimate_variance(theta_hat = theta_hat, w_theta_est = w_theta_est, args = args, n_true = 10000)
         variance = variance/args.T
         # print(algorithm, variance)
         x = np.linspace(true_theta-0.5,true_theta+0.5,1000)

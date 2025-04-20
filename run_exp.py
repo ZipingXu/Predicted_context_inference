@@ -14,6 +14,7 @@ def parse_args():
     parser.add_argument('--p0', type=float, default=0.1,
                         help='Minimum probability threshold (between 0 and 0.5)')
     parser.add_argument('--env', type=str, default = 'failure1', help='choice from [random, failure1, failure2]')
+    parser.add_argument('--gamma', type=float, default = 0, help='Temperature parameter for Boltzmann')
     
     # Problem parameters  (only used in random environment)
     parser.add_argument('--d', type=int, default=1, help='Dimension of context vectors')
@@ -59,38 +60,30 @@ elif args.env == 'failure2':
     args.sigma_s = sigma_s
     args.theta = np.array([-3, -1]).reshape((args.d, args.n_action))
 
-# algorithm default parameters
-
-runUCB = lambda x_list, x_tilde_list, bandit_inst, prwd: bandit_inst.UCB_w_predicted_state (
-        x_list = x_list,
-        x_tilde_list = x_tilde_list, 
-        potential_reward_list = prwd['potential_reward_list'],  
+# Define algorithm runners with updated parameter lists
+runUCB = lambda bandit_inst: bandit_inst.UCB(
         C = 1.0, l = 1., p_0 = args.p0, 
         x_tilde_test = np.array([-1.])
 )
-runTS = lambda x_list, x_tilde_list, bandit_inst, prwd: bandit_inst.TS_w_predicted_state(
-        x_list = x_list,
-        x_tilde_list = x_tilde_list, 
-        potential_reward_list = prwd['potential_reward_list'], 
+runTS = lambda bandit_inst: bandit_inst.TS(
         rho2 = args.sigma_eta ** 2, l = 1., p_0 = args.p0, 
         x_tilde_test = np.array([-1.]))
-runBoltzmann = lambda x_list, x_tilde_list, bandit_inst, prwd: bandit_inst.Boltzmann_w_predicted_state(
-        x_list = x_list,
-        x_tilde_list = x_tilde_list, 
-        potential_reward_list = prwd['potential_reward_list'], 
-        C = 1.0, l = 1., p_0 = args.p0, 
+runBoltzmann = lambda bandit_inst: bandit_inst.Boltzmann(
+        gamma = args.gamma, l = 1., p_0 = args.p0, 
+        x_tilde_test = np.array([-1.]))
+runRandom = lambda bandit_inst: bandit_inst.random_policy(
+        p_0 = args.p0,
         x_tilde_test = np.array([-1.]))
 
+# Prepare data for MEB algorithm
 ind_S = (np.arange(args.T) > 100)
 pi_nd_list = 0.5 * np.ones((args.T, args.n_action))
 pi_nd = np.array([0.5, 0.5])
 Sigma_e_hat_list = np.zeros((args.T, args.d, args.d))
 for t in range(args.T):
     Sigma_e_hat_list[t, :, :] = args.sigma_e * np.eye(args.d)
-runMEB = lambda x_list, x_tilde_list, bandit_inst, pwrd: bandit_inst.online_me_adjust_w_predicted_state(
-        x_list = x_list, 
-        x_tilde_list = x_tilde_list, 
-        potential_reward_list = pwrd['potential_reward_list'],
+    
+runMEB = lambda bandit_inst: bandit_inst.MEB(
         Sigma_e_hat_list = Sigma_e_hat_list,
         ind_S = ind_S, 
         pi_nd_list = pi_nd_list, 
@@ -104,63 +97,58 @@ alg_dict = {
     'UCB': runUCB,
     'TS': runTS,
     'MEB': runMEB,
-    'Boltzmann': runBoltzmann
+    'Boltzmann': runBoltzmann,
+    'Random': runRandom
 }
 
+# Initialize history dictionary with empty structure
 history_dict = {
-    "theta_est":{
-        "UCB": np.zeros((args.n_rep, args.n_action, args.T, args.d)),
-        "TS": np.zeros((args.n_rep, args.n_action, args.T, args.d)),
-        "MEB": np.zeros((args.n_rep, args.n_action, args.T, args.d)),
-        "Boltzmann": np.zeros((args.n_rep, args.n_action, args.T, args.d))
-    },
-    "pi_list":{
-        "UCB": np.zeros((args.n_rep, args.T, args.n_action)),
-        "TS": np.zeros((args.n_rep, args.T, args.n_action)),
-        "MEB": np.zeros((args.n_rep, args.T, args.n_action)),
-        "Boltzmann": np.zeros((args.n_rep, args.T, args.n_action))
-    },
-    "theta_est_batch":{
-        "UCB": np.zeros((args.n_rep, args.n_action, args.d)),
-        "TS": np.zeros((args.n_rep, args.n_action, args.d)),
-        "MEB": np.zeros((args.n_rep, args.n_action, args.d)),
-        "Boltzmann": np.zeros((args.n_rep, args.n_action, args.d))
-    },
-    "theta_est_naive":{
-        "UCB": np.zeros((args.n_rep, args.n_action, args.d)),
-        "TS": np.zeros((args.n_rep, args.n_action, args.d)),
-        "MEB": np.zeros((args.n_rep, args.n_action, args.d)),
-        "Boltzmann": np.zeros((args.n_rep, args.n_action, args.d))
-    },
-    "coverage_list": {
-        "UCB": np.zeros((args.n_rep, args.T // args.coverage_freq)),
-        "TS": np.zeros((args.n_rep, args.T // args.coverage_freq)),
-        "MEB": np.zeros((args.n_rep, args.T // args.coverage_freq)),
-        "Boltzmann": np.zeros((args.n_rep, args.T // args.coverage_freq))
-    }
+    "theta_est": {},
+    "pi_list": {},
+    "theta_est_batch": {},
+    "theta_est_naive": {},
+    "coverage_list": {}
 }
+
+# Define algorithms
+algorithms = ["UCB", "TS", "MEB", "Boltzmann", "Random"]
+
+# Initialize arrays for each algorithm
+for alg in algorithms:
+    history_dict["theta_est"][alg] = np.zeros((args.n_rep, args.n_action, args.T, args.d))
+    history_dict["pi_list"][alg] = np.zeros((args.n_rep, args.T, args.n_action))
+    history_dict["theta_est_batch"][alg] = np.zeros((args.n_rep, args.n_action, args.d))
+    history_dict["theta_est_naive"][alg] = np.zeros((args.n_rep, args.n_action, args.d))
+    history_dict["coverage_list"][alg] = np.zeros((args.n_rep, args.T // args.coverage_freq))
 
 for i in tqdm(range(args.n_rep), desc="Running experiments"):
+    # Generate contexts
     x_list, x_tilde_list = generate_x_tilde(args.T)
     if args.env == 'random':
         args.theta = np.random.normal(0, 1, args.d * args.n_action).reshape((args.d, args.n_action))
         args.theta_all.append(args.theta)
 
-    Bandit_1 = LinBandit(theta = args.theta, sigma = args.sigma_eta, args = args)
-    Bandit_info = Bandit_1.generate_potential_reward_w_xtilde(x_list = x_list, x_tilde_list = x_tilde_list)
+    # Create bandit instance and initialize contexts
+    Bandit_1 = LinBandit(theta=args.theta, sigma=args.sigma_eta, args=args)
+    Bandit_1.generate_potential_reward_w_xtilde(x_list=x_list, x_tilde_list=x_tilde_list)
     
     for alg in alg_dict.keys():
-        # print(f"Running {alg}")
-        history = alg_dict[alg](x_list, x_tilde_list, Bandit_1, Bandit_info)
-        history_dict['theta_est'][alg][i, :, :, :] = history['theta_est_list']
-        history_dict['pi_list'][alg][i, :, :] = history['pi_list_test']
+        # Execute algorithm (now without passing contexts explicitly)
+        result_dict = alg_dict[alg](Bandit_1)
+        
+        # Store results in history dictionary
+        history_dict['theta_est'][alg][i, :, :, :] = result_dict['theta_est_list']
+        history_dict['pi_list'][alg][i, :, :] = result_dict['pi_list_test']
+        history_dict['coverage_list'][alg][i, :] = np.array(result_dict['coverage_list'])
+        
+        # Calculate and store weighted and naive theta estimates
         history_dict['theta_est_batch'][alg][i, :, :] = weighted_theta_est(
-            history = history, 
-            pi_nd = pi_nd,
-            sigma_e = args.sigma_e
+            history=result_dict, 
+            pi_nd=pi_nd,
+            sigma_e=args.sigma_e
         )
-        history_dict['theta_est_naive'][alg][i, :, :] = naive_theta_est(history)
-        history_dict['coverage_list'][alg][i, :] = np.array(history['coverage_list'])
+        history_dict['theta_est_naive'][alg][i, :, :] = naive_theta_est(result_dict)
+        
 # Save history dictionary to a pickle file
 if args.env == 'random':
     name = f'{args.save_path}history_dict_random_{args.sigma_s}_{args.sigma_e}_{args.name}.pkl'
