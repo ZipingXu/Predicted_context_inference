@@ -22,30 +22,43 @@ def compute_coverage(cur_theta_est, var_est, theta_true, alpha = 0.05):
     return(cover)
 
 
-def estimate_variance(policy_func, w_theta_est, args, n_true = 1000):
+def estimate_variance(policy_func, w_theta_est, env, n_true = 1000):
     ## estimate the asymptotic variance of the weighted estimator
     d = w_theta_est.shape[0]
     n_action = w_theta_est.shape[1]
-    if args.env == "random":
-        x_list, x_tilde_list = generate_x_tilde_gaussian(n_true, args.sigma_s, args.sigma_e, d)
-    else:
-        x_list, x_tilde_list = generate_x_tilde(n_true)
+
+    x_list, x_tilde_list = env.generate_context(n_true)
+    potential_reward_list, at_dag_list = env.generate_potential_rewards(x_list, x_tilde_list)
         
     asy_var = np.zeros((n_action, d, d))
+    avg_pa = np.zeros(n_action)
     # p0 = args.p0 if p0 is None else p0
     # calculate the asymptotic variance \Sigma_{\theta, a} according to Theorem 4.1
-    for t in range(n_true):
-        x_tilde_t = x_tilde_list[t, :]
-        x_t = x_list[t, :]
-        # max_r = np.max(np.dot(x_tilde_t, theta_hat))
-        for a in range(n_action):
-            pa = policy_func(x_tilde_t)[a]
-            ha_t = (x_tilde_t.reshape((d, 1)) @ x_tilde_t.reshape((1, d)) - args.sigma_e) @ w_theta_est[:, a] - x_tilde_t.reshape((d, 1)) @ x_t.reshape((1, d)) @ w_theta_est[:, a]
-            asy_var[a, :, :] += (1 / pa) * (ha_t.reshape((d, 1)) @ ha_t.reshape((1, d)) + args.sigma_eta * x_tilde_t.reshape((d, 1)) @ x_tilde_t.reshape((1, d)))
-    # for a in range(n_action):
-    #     asy_var[a, :, :] *= asy_var[a, :, :] / (pi_nd[a]**2)
-    asy_var = asy_var * args.sigma_s**(-2)
-    return asy_var / n_true
+    if env.mis:
+        Hat = np.zeros((n_action, d, d))
+        for t in range(n_true):
+            x_tilde_t = x_tilde_list[t, :]
+            pa = policy_func(x_tilde_t)
+            avg_pa += pa
+            at = np.random.choice(range(n_action), p=pa)
+            Hat[at, :, :] += (1/(pa[at])**2) * np.outer(x_tilde_t, x_tilde_t) * (potential_reward_list[t, at] - np.dot(x_tilde_t, w_theta_est[:, at]))**2
+        asy_var = Hat * env.sigma_s**(-2) / n_true
+        # asy_var = Hat / n_true
+    else:
+        for t in range(n_true):
+            x_tilde_t = x_tilde_list[t, :]
+            x_t = x_list[t, :]
+            # max_r = np.max(np.dot(x_tilde_t, theta_hat))
+            for a in range(n_action):
+                pa = policy_func(x_tilde_t)[a]
+                avg_pa[a] += pa
+                ha_t = (x_tilde_t.reshape((d, 1)) @ x_tilde_t.reshape((1, d)) - env.sigma_e) @ w_theta_est[:, a] - x_tilde_t.reshape((d, 1)) @ x_t.reshape((1, d)) @ w_theta_est[:, a]
+                asy_var[a, :, :] += (1 / pa) * (ha_t.reshape((d, 1)) @ ha_t.reshape((1, d)) + env.sigma_eta**2 * x_tilde_t.reshape((d, 1)) @ x_tilde_t.reshape((1, d)))
+        # for a in range(n_action):
+        #     asy_var[a, :, :] *= asy_var[a, :, :] / (pi_nd[a]**2)
+        asy_var = asy_var * env.sigma_s**(-2) / n_true
+        avg_pa = avg_pa / n_true
+    return asy_var, avg_pa
 
 def naive_theta_est(history, n_action=2):
     """Calculate naive theta estimates from experiment history.

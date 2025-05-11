@@ -14,16 +14,16 @@ PAPER_RED = '#D55E00'   # A clear, professional red
 
 save_path = './results/'
 
-with open('./runs/history_dict_failure1.pkl', 'rb') as f:
-    history_dict, args = pickle.load(f)
+# with open('./runs/history_dict_failure1.pkl', 'rb') as f:
+#     history_dict, args = pickle.load(f)
 
-print(args)
+# print(args)
 
 algorithms = ['UCB', 'TS', 'MEB', 'Boltzmann', 'Random']
 
 n_plot = len(algorithms)
 
-def plot_coverage(history_dict, args, save = None):
+def plot_coverage(history_dict, args, save = None, y_low = None, echo = False):
     fig, ax = plt.subplots(figsize=(8, 5))
     coverage_freq = args.coverage_freq
     
@@ -33,10 +33,12 @@ def plot_coverage(history_dict, args, save = None):
     for i_algorithm, algorithm in enumerate(algorithms):
         means_coverage = np.mean(history_dict['coverage_list'][algorithm], axis=0)
         ses_coverage = np.std(history_dict['coverage_list'][algorithm], axis=0) / np.sqrt(args.n_rep)
+        if echo:
+            print(algorithm, means_coverage[-1], ses_coverage[-1])
         
-        ax.plot(np.arange(1, args.T, coverage_freq), means_coverage, 
+        ax.plot(np.arange(1, args.T+1, coverage_freq), means_coverage, 
                 color=colors[i_algorithm], label=algorithm)
-        ax.fill_between(np.arange(1, args.T, coverage_freq), 
+        ax.fill_between(np.arange(1, args.T+1, coverage_freq),
                        means_coverage - ses_coverage, 
                        means_coverage + ses_coverage, 
                        color=colors[i_algorithm], alpha=0.1)
@@ -44,7 +46,8 @@ def plot_coverage(history_dict, args, save = None):
     ax.set_title('Coverage of $\\theta$ across Algorithms')
     ax.set_xlabel('T')
     ax.set_ylabel('Coverage')
-    # ax.set_ylim(0.8, 1)
+    if y_low is not None:
+        ax.set_ylim(y_low, 1)
     ax.axhline(y=0.95, color='red', linestyle='--', label='Target Coverage')
     ax.legend()
     
@@ -53,6 +56,40 @@ def plot_coverage(history_dict, args, save = None):
         plt.savefig(save)
     else:
         plt.show()
+
+def plot_coverage_w_ax(history_dict, args, ax=None, y_low=None):
+    """
+    Plot coverage with a specified axis for subplot grids.
+    Similar to plot_coverage but works with external subplots.
+    """
+    if ax is None:
+        ax = plt.gca()
+    
+    coverage_freq = args.coverage_freq
+    
+    # Define a color palette for the algorithms
+    colors = plt.cm.Set2(np.linspace(0, 1, len(algorithms)))
+    
+    for i_algorithm, algorithm in enumerate(algorithms):
+        means_coverage = np.mean(history_dict['coverage_list'][algorithm], axis=0)[1:]
+        ses_coverage = np.std(history_dict['coverage_list'][algorithm], axis=0)[1:] / np.sqrt(args.n_rep)
+        
+        ax.plot(np.arange(1, args.T+1, coverage_freq)[1:], means_coverage, 
+                color=colors[i_algorithm], label=algorithm)
+        ax.fill_between(np.arange(1, args.T+1, coverage_freq)[1:],
+                       means_coverage - ses_coverage, 
+                       means_coverage + ses_coverage, 
+                       color=colors[i_algorithm], alpha=0.1)
+    
+    ax.set_title('Coverage of $\\theta$ across Algorithms')
+    ax.set_xlabel('T')
+    ax.set_ylabel('Coverage')
+    if y_low is not None:
+        ax.set_ylim(y_low, 1)
+    ax.axhline(y=0.95, color='red', linestyle='--', label='Target Coverage')
+    ax.legend()
+    
+    # No plt.tight_layout() or plt.show() as these will be handled by the caller
 
 def plot_theta_est(history_dict, args, diff=False, save = None):
     if not diff:
