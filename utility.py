@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.stats import norm
-from context_generator import generate_x_tilde, generate_x_tilde_gaussian
+# from context_generator import generate_x_tilde, generate_x_tilde_gaussian
 
 ## utility functions
 def prob_clip(x, p_0):
@@ -28,7 +28,7 @@ def estimate_variance(policy_func, w_theta_est, env, n_true = 1000):
     n_action = w_theta_est.shape[1]
 
     x_list, x_tilde_list = env.generate_context(n_true)
-    potential_reward_list, at_dag_list = env.generate_potential_rewards(x_list, x_tilde_list)
+    potential_reward_list, _ = env.generate_potential_rewards(x_list, x_tilde_list, noise = True)
         
     asy_var = np.zeros((n_action, d, d))
     avg_pa = np.zeros(n_action)
@@ -43,20 +43,19 @@ def estimate_variance(policy_func, w_theta_est, env, n_true = 1000):
             at = np.random.choice(range(n_action), p=pa)
             Hat[at, :, :] += (1/(pa[at])**2) * np.outer(x_tilde_t, x_tilde_t) * (potential_reward_list[t, at] - np.dot(x_tilde_t, w_theta_est[:, at]))**2
         asy_var = Hat * env.sigma_s**(-2) / n_true
-        # asy_var = Hat / n_true
+        avg_pa = avg_pa / n_true
     else:
         for t in range(n_true):
             x_tilde_t = x_tilde_list[t, :]
             x_t = x_list[t, :]
-            # max_r = np.max(np.dot(x_tilde_t, theta_hat))
             for a in range(n_action):
                 pa = policy_func(x_tilde_t)[a]
                 avg_pa[a] += pa
-                ha_t = (x_tilde_t.reshape((d, 1)) @ x_tilde_t.reshape((1, d)) - env.sigma_e) @ w_theta_est[:, a] - x_tilde_t.reshape((d, 1)) @ x_t.reshape((1, d)) @ w_theta_est[:, a]
-                asy_var[a, :, :] += (1 / pa) * (ha_t.reshape((d, 1)) @ ha_t.reshape((1, d)) + env.sigma_eta**2 * x_tilde_t.reshape((d, 1)) @ x_tilde_t.reshape((1, d)))
+                ha_t = (np.outer(x_tilde_t, x_tilde_t) - env.sigma_e * np.eye(d)) @ w_theta_est[:, a] - np.outer(x_tilde_t, x_t) @ w_theta_est[:, a]
+                asy_var[a, :, :] += (1 / pa) * (np.outer(ha_t, ha_t) + (env.sigma_eta**2) * np.outer(x_tilde_t, x_tilde_t))
         # for a in range(n_action):
         #     asy_var[a, :, :] *= asy_var[a, :, :] / (pi_nd[a]**2)
-        asy_var = asy_var * env.sigma_s**(-2) / n_true
+        asy_var = asy_var * env.sigma_s**(-2) / n_true 
         avg_pa = avg_pa / n_true
     return asy_var, avg_pa
 
@@ -121,7 +120,6 @@ def weighted_theta_est(history, pi_nd, sigma_e, n_action=2, stop_t=None):
     """
     if pi_nd is None:
         pi_nd = np.ones(n_action) / n_action
-        
     ## extract information
     x_list = history['x_list']
     x_tilde_list = history['x_tilde_list']
@@ -153,7 +151,7 @@ def weighted_theta_est(history, pi_nd, sigma_e, n_action=2, stop_t=None):
         ipt_wt = pi_nd[A_t] / pi_list[t, A_t]
         
         ## update Ut for a = A_t using rank-1 update
-        update_term = ipt_wt * (np.outer(x_tilde_t, x_tilde_t) - sigma_e)
+        update_term = ipt_wt * (np.outer(x_tilde_t, x_tilde_t) - sigma_e * np.eye(d))
         Vt[A_t, :, :] += update_term
 
         ## update bt for a = A_t

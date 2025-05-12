@@ -22,14 +22,7 @@ class EnvConfig:
     hidden_dim: int = 10  # hidden dimension for neural network
     df: int = 10  # degrees of freedom for Student-t noise
     def __post_init__(self):
-        if self.theta is None:
-            if self.env_type == "neural_network":
-                # For neural network, theta will be initialized in the environment
-                pass
-            else:
-                self.theta = np.zeros((self.d, self.n_action))
-                self.theta[:, 0] = np.array([3.])
-                self.theta[:, 1] = np.array([1.])
+        self.theta = None
 
 class NeuralNetwork(nn.Module):
     """Two-layer neural network with ReLU activation"""
@@ -57,6 +50,7 @@ class Environment:
         self.d = config.d
         self.n_action = config.n_action
         self.theta = config.theta
+        self.nn = None
         self.sigma_eta = config.sigma_eta
         self.sigma_e = config.sigma_e
         self.sigma_s = config.sigma_s
@@ -65,34 +59,30 @@ class Environment:
         self.q = config.q
         self.hidden_dim = config.hidden_dim
         
-        # Initialize neural network if needed
-        if config.env_type == "neural_network":
-            self.nn = NeuralNetwork(self.d, self.hidden_dim, self.n_action)
-            # Initialize weights with Xavier initialization
-            nn.init.xavier_uniform_(self.nn.layer1.weight)
-            nn.init.xavier_uniform_(self.nn.layer2.weight)
-            nn.init.zeros_(self.nn.layer1.bias)
-            nn.init.zeros_(self.nn.layer2.bias)
-        
         # For failure modes
         if config.env_type in ["failure1", "failure2"]:
             self.x_dict = [0, -1]  # true context uniformly drawn from this distribution
-            if config.env_type == "failure1":
-                self.e_dict = {
-                    0: {"e": [1, -2], "p": [2/3, 1/3]},
-                    -1: {"e": [-1, 2], "p": [2/3, 1/3]}
-                }
-            else:  # failure2
-                self.e_dict = {
-                    0: {"e": [2, -1], "p": [1/3, 2/3]},
-                    -1: {"e": [-2, 1], "p": [1/3, 2/3]}
-                }
+            self.e_dict = {
+                0: {"e": [1, -2], "p": [2/3, 1/3]},
+                -1: {"e": [-1, 2], "p": [2/3, 1/3]}
+            }
             # variance of e_t
-            self.sigma_e = (2./3 * 1 + 1./3 * 4)
+            self.sigma_e = (2./3 * 1**2 + 1./3 * 2**2) # 2
             # variance of x_t
-            self.sigma_s = np.sum((self.x_dict-(np.mean(self.x_dict, axis=0)))**2, axis=0)
+            # self.sigma_s = np.mean((self.x_dict-(np.mean(self.x_dict, axis=0)))**2, axis=0) # 0.25
+            if self.mis:
+                self.sigma_s = np.mean(np.array(self.x_dict)**2, axis=0) + self.sigma_e
+            else:
+                self.sigma_s = np.mean(np.array(self.x_dict)**2, axis=0) # 0.5
             self.d = 1
             self.n_action = 2
+    def initialize_nn(self):
+        self.nn = NeuralNetwork(self.d, self.hidden_dim, self.n_action)
+        # Initialize weights with Xavier initialization
+        nn.init.xavier_uniform_(self.nn.layer1.weight)
+        nn.init.xavier_uniform_(self.nn.layer2.weight)
+        nn.init.zeros_(self.nn.layer1.bias)
+        nn.init.zeros_(self.nn.layer2.bias)
     
     def initialize(self, T: int):
         """Initialize environment for running bandit algorithm
@@ -107,17 +97,20 @@ class Environment:
     def generate_theta(self):
         """Generate theta parameters based on environment type"""
         if self.config.env_type == "random":
-            self.theta = np.random.normal(0, 1, self.d * self.n_action).reshape((self.d, self.n_action))
+            if self.theta is None:
+                self.theta = np.random.normal(0, 1, self.d * self.n_action).reshape((self.d, self.n_action))
         elif self.config.env_type == "failure1":
             self.theta = np.array([3, 1]).reshape((self.d, self.n_action))
         elif self.config.env_type == "failure2":
             self.theta = np.array([-3, -1]).reshape((self.d, self.n_action))
         elif self.config.env_type == "polynomial":
             # For polynomial, theta has shape (d*q, n_action)
-            self.theta = np.random.normal(0, 1, self.d * self.q * self.n_action).reshape((self.d * self.q, self.n_action))
+            if self.theta is None:
+                self.theta = np.random.normal(0, 1, self.d * self.q * self.n_action).reshape((self.d * self.q, self.n_action))
         elif self.config.env_type == "neural_network":
             # For neural network, theta is handled by the nn model
-            pass
+            if self.nn is None:
+                self.initialize_nn()
         else:
             raise ValueError(f"Unknown environment type: {self.config.env_type}")
         
@@ -146,13 +139,8 @@ class Environment:
                     T
                 )
             elif self.config.context_noise == "Laplace":
-                x_tilde_list = x_list + np.random.laplace(0, self.sigma_e, (T, self.d))
-            elif self.config.context_noise == "Student-t":
-                std_t = np.std(np.random.standard_t(self.config.df, 5000))
-                x_tilde_list = x_list + np.random.standard_t(self.config.df, (T, self.d)) * self.sigma_e / std_t
-            elif self.config.context_noise == "Pareto":
-                std_t = np.std(np.random.pareto(self.config.df, 5000))
-                x_tilde_list = x_list + np.random.pareto(self.config.df, (T, self.d)) * self.sigma_e / std_t
+                std_t = np.std(np.random.laplace(0, self.sigma_e, 5000))
+                x_tilde_list = x_list + np.random.laplace(0, self.sigma_e, (T, self.d)) * np.sqrt(self.sigma_e) / std_t
             else:
                 raise ValueError(f"Unknown context noise type: {self.config.context_noise}")
         elif self.config.env_type in ["failure1", "failure2"]:
@@ -170,6 +158,9 @@ class Environment:
                 x_tilde_list[t, :] = x_tilde_t
         else:
             raise ValueError(f"Unknown environment type: {self.config.env_type}")
+        
+        if self.mis and self.config.env_type in ["polynomial", "neural_network"]:
+            x_tilde_list = x_list # x_tilde_list should be the true context for polynomial and neural network
         return x_list, x_tilde_list
     def generate_potential_rewards(self, x_list: np.ndarray, x_tilde_list: np.ndarray, noise = True):
         T = x_list.shape[0]
@@ -177,14 +168,13 @@ class Environment:
         at_dag_list = np.zeros(T)
         for t in range(T):
             x_t = x_list[t, :]
-            x_tilde_t = x_tilde_list[t, :]
+            # x_tilde_t = x_tilde_list[t, :]
             reward_list = []
             for a in range(self.n_action):
-                x = x_t if not self.mis else x_tilde_t
                 if noise:
-                    potential_reward_t = self.realized_reward(x, a)
+                    potential_reward_t = self.realized_reward(x_t, a)
                 else:
-                    potential_reward_t = self.mean_reward(x, a)
+                    potential_reward_t = self.mean_reward(x_t, a)
                 reward_list.append(potential_reward_t)
             potential_reward_list[t, :] = np.array(reward_list)
             at_dag_list[t] = np.argmax(reward_list)
@@ -241,7 +231,7 @@ class Environment:
             Realized reward with noise
         """
         mu = self.mean_reward(x, a)
-        return mu + np.random.normal(0, self.sigma_eta)
+        return mu + np.random.normal(0, np.sqrt(self.sigma_eta))
     
     def compute_regret(self, x_t, pi_t, p0):
         """Compute regret for the current timestep

@@ -76,6 +76,8 @@ def plot_coverage_w_ax(history_dict, args, ax=None, y_low=None):
         
         ax.plot(np.arange(1, args.T+1, coverage_freq)[1:], means_coverage, 
                 color=colors[i_algorithm], label=algorithm)
+        ax.scatter(np.arange(1, args.T+1, coverage_freq)[1:], means_coverage, 
+                   color=colors[i_algorithm], alpha=0.5)
         ax.fill_between(np.arange(1, args.T+1, coverage_freq)[1:],
                        means_coverage - ses_coverage, 
                        means_coverage + ses_coverage, 

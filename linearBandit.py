@@ -3,7 +3,7 @@ import scipy.stats as stats
 import numpy as np
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
-from utility import prob_clip, compute_coverage, weighted_theta_est, estimate_variance, softmax
+from utility import prob_clip, compute_coverage, weighted_theta_est, softmax
 
 class CoverageTracker:
     def __init__(self, n_action, dim, env):
@@ -33,7 +33,7 @@ class CoverageTracker:
         Returns:
             Updated Vt and bt
         """
-        imp_weight = (1/self.n_action) / pi_t[at]
+        imp_weight = 1 / pi_t[at]
         if self.env.mis:
             self.w_Vt[at,:,:] += imp_weight * np.outer(x_tilde_t, x_tilde_t)
         else:
@@ -41,19 +41,59 @@ class CoverageTracker:
         self.w_bt[at,:] += imp_weight * x_tilde_t * rt
         
         # Update w_Vt_inv
-        
-        self.w_Vt_inv[at,:,:] = np.linalg.pinv(self.w_Vt[at,:,:])
-        
-        self.w_theta_est[at,:] = self.w_Vt_inv[at,:,:] @ self.w_bt[at,:]
+    
         return self.w_Vt, self.w_bt, self.w_theta_est
-    def get_coverage(self, policy_func, t, theta_true, env):
-            var_est, avg_pa = estimate_variance(policy_func=policy_func, w_theta_est=self.w_theta_est.T, env=env) 
-            avg_pa = np.array(avg_pa)
-            var_est = var_est / (t+1)
-            coverage = compute_coverage(cur_theta_est=self.w_theta_est[0, 0], 
+    def get_coverage(self, policy_func, t):
+        # compute this inverse only when needed
+        for a in range(self.n_action):
+            self.w_Vt_inv[a,:,:] = np.linalg.pinv(self.w_Vt[a,:,:])            
+            self.w_theta_est[a,:] = self.w_Vt_inv[a,:,:] @ self.w_bt[a,:]
+        if self.env.mis:
+            theta_true = self.env.best_theta
+        else:
+                theta_true = self.env.theta
+        var_est, avg_pa = self.estimate_variance(policy_func=policy_func) 
+        var_est = var_est / (t+1)
+        coverage = compute_coverage(cur_theta_est=self.w_theta_est[0, 0], 
                                             var_est=var_est[0, 0, 0], 
-                                            theta_true=theta_true[0, 0])
-            return coverage, avg_pa, var_est
+                                            theta_true=theta_true[0, 0], alpha=0.1)
+        return coverage, avg_pa, var_est
+    def estimate_variance(self, policy_func, n_true = 5000):
+        ## estimate the asymptotic variance of the weighted estimator
+        w_theta_est = self.w_theta_est.T
+        d = w_theta_est.shape[0]
+        n_action = w_theta_est.shape[1]
+
+        x_list, x_tilde_list = self.env.generate_context(n_true)
+        potential_reward_list, _ = self.env.generate_potential_rewards(x_list, x_tilde_list, noise = True)
+            
+        asy_var = np.zeros((n_action, d, d))
+        avg_pa = np.zeros(n_action)
+        if self.env.mis:
+            Hat = np.zeros((n_action, d, d))
+            for t in range(n_true):
+                x_tilde_t = x_tilde_list[t, :]
+                pa = policy_func(x_tilde_t)
+                avg_pa += pa
+                at = np.random.choice(range(n_action), p=pa)
+                Hat[at, :, :] += (1/(pa[at]**2)) * np.outer(x_tilde_t, x_tilde_t) * (potential_reward_list[t, at] - np.dot(x_tilde_t, w_theta_est[:, at]))**2
+            asy_var = Hat * self.env.sigma_s**(-2) / n_true
+            avg_pa = avg_pa / n_true
+        else:
+            for t in range(n_true):
+                x_tilde_t = x_tilde_list[t, :]
+                x_t = x_list[t, :]
+                for a in range(n_action):
+                    pa = policy_func(x_tilde_t)[a]
+                    avg_pa[a] += pa
+                    ha_t = (np.outer(x_tilde_t, x_tilde_t) - self.env.sigma_e * np.eye(d)) @ w_theta_est[:, a] - np.outer(x_tilde_t, x_t) @ w_theta_est[:, a]
+                    asy_var[a, :, :] += (1 / pa) * (np.outer(ha_t, ha_t) + (self.env.sigma_eta**2) * np.outer(x_tilde_t, x_tilde_t))
+            # for a in range(n_action):
+            #     asy_var[a, :, :] *= asy_var[a, :, :] / (pi_nd[a]**2)
+            asy_var = asy_var * self.env.sigma_s**(-2) / n_true 
+            avg_pa = avg_pa / n_true
+        avg_pa = np.array(avg_pa)
+        return asy_var, avg_pa
 
 @dataclass
 class BanditExperimentLogger:
@@ -154,6 +194,7 @@ class LinBandit:
         self.env = env
         self.theta = env.theta
         self.sigma_eta = env.sigma_eta 
+        self.sigma_e = env.sigma_e
         self.n_action = env.n_action
         self.dim = env.d
         self.args = args
@@ -165,7 +206,7 @@ class LinBandit:
         self.at_dag_list = env.at_dag_list
 
         self.p0 = args.p0
-        self.sigma_e = args.sigma_e
+        
         self.avg_pa = [0, 0]
 
         # Algorithm hyperparameters
@@ -255,28 +296,30 @@ class LinBandit:
         self.Vt[at,:,:] += np.outer(x_tilde_t, x_tilde_t)
         self.bt[at,:] += x_tilde_t * rt
 
-        x = x_tilde_t
-        V_inv_x = self.Vt_inv[at,:,:] @ x
-        denominator = 1 + x @ V_inv_x
+        # x = x_tilde_t
+        V_inv_x = self.Vt_inv[at,:,:] @ x_tilde_t
+        denominator = 1 + x_tilde_t @ V_inv_x
         
         outer_update = np.outer(V_inv_x, V_inv_x) / denominator
         self.Vt_inv[at,:,:] = self.Vt_inv[at,:,:] - outer_update
         self.theta_est[at,:] = self.Vt_inv[at,:,:] @ self.bt[at,:]
         
         # Update w_Vt_inv
-        if self.args.env == "meb":
-            imp_weight = (1/self.n_action) / pi_t[at]
-            if t < 100: # use naive estimator for the first 100 timesteps
-                imp_weight = 1
-            if self.args.mis:
-                self.w_Vt[at,:,:] += imp_weight * np.outer(x_tilde_t, x_tilde_t)
-            else:
-                self.w_Vt[at,:,:] += imp_weight * (np.outer(x_tilde_t, x_tilde_t) - self.sigma_e * np.eye(self.dim))
-            self.w_bt[at,:] += imp_weight * x_tilde_t * rt
+        # if self.args.env == "meb":
+        imp_weight = 1 / pi_t[at]
+        if t < 100: # use naive estimator for the first 100 timesteps
+            imp_weight = 1/2
+        # print(self.env.mis)
+        if self.env.mis:
+            self.w_Vt[at,:,:] += imp_weight * np.outer(x_tilde_t, x_tilde_t)
+        else:
+            self.w_Vt[at,:,:] += imp_weight * (np.outer(x_tilde_t, x_tilde_t) - self.sigma_e * np.eye(self.dim))
+        self.w_bt[at,:] += imp_weight * x_tilde_t * rt
             
-            self.w_Vt_inv[at,:,:] = np.linalg.pinv(self.w_Vt[at,:,:])
+        self.w_Vt_inv[at,:,:] = np.linalg.pinv(self.w_Vt[at,:,:])
             
-            self.w_theta_est[at,:] = self.w_Vt_inv[at,:,:] @ self.w_bt[at,:]
+        self.w_theta_est[at,:] = self.w_Vt_inv[at,:,:] @ self.w_bt[at,:]
+
         
         return self.Vt, self.bt, self.w_Vt, self.w_bt, self.theta_est, self.w_theta_est
 
@@ -405,6 +448,7 @@ class LinBandit:
         Returns:
             Dictionary containing history and results
         """
+
         # Set up policy function based on the choice
         if policy.lower() == 'random':
             policy_func = self.random_policy
@@ -468,17 +512,17 @@ class LinBandit:
             self.coverage_tracker._update_statistics(x_tilde_t, at, rt, pi_t, t)
             
             # Update logger with this timestep
-            if policy.lower() != 'meb':
+            if policy.lower() in ['meb', 'random']:
                 logger.update_step(t, self.w_theta_est, at, pi_t, pi_test)
             else:
                 logger.update_step(t, self.theta_est, at, pi_t, pi_test)
             
             # Compute coverage if needed
             if (t+1) % self.coverage_freq == 0:
-                if self.args.mis:
-                    self.coverage, self.avg_pa, self.var_est = self.coverage_tracker.get_coverage(policy_func, t, self.env.best_theta, self.env)
-                else:
-                    self.coverage, self.avg_pa, self.var_est = self.coverage_tracker.get_coverage(policy_func, t, self.env.theta, self.env)
+                self.coverage, self.avg_pa, self.var_est = self.coverage_tracker.get_coverage(policy_func, t)
+                # print(np.linalg.norm(self.env.best_theta[:, 0] - self.w_theta_est[0, :]))
+                # else:
+                    # self.coverage, self.avg_pa, self.var_est = self.coverage_tracker.get_coverage(policy_func, t, self.env.theta)
             logger.log(self.coverage, "coverage", t)
             logger.log(self.avg_pa, "avg_pa", t)
             logger.log(self.var_est[0, 0, 0], "var_est", t)

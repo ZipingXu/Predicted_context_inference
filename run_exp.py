@@ -24,10 +24,10 @@ def parse_args():
     
     # Problem parameters  (only used in random environment)
     parser.add_argument('-d', type=int, default=1, help='Dimension of context vectors')
-    parser.add_argument('--sigma_eta', type=float, default=0, help='Reward noise variance')
-    parser.add_argument('--context_noise', type=str, default='Gaussian', help='Context noise type', choices=['Gaussian', 'Laplace', 'Student-t, Pareto'])
-    parser.add_argument('--sigma_e', type=float, default=0.1, help='Context noise variance')
-    parser.add_argument('--sigma_s', type=float, default=0.1, help='Context variance (only used in random environment)')
+    parser.add_argument('--sigma_eta', type=float, default=0.1, help='Reward noise variance')
+    parser.add_argument('--context_noise', type=str, default='Gaussian', help='Context noise type', choices=['Gaussian', 'Laplace'])
+    parser.add_argument('--sigma_e', type=float, default=2, help='Context noise variance')
+    parser.add_argument('--sigma_s', type=float, default=0.25, help='Context variance (only used in random environment)')
     parser.add_argument('--n_action', type=int, default=2, help='Number of actions')
     parser.add_argument('--coverage_freq', type=int, default=100, help='Frequency of coverage check')
     # Experiment settings
@@ -35,9 +35,13 @@ def parse_args():
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     parser.add_argument('--save_path', type=str, default='./runs/', help='Path to save results')
     parser.add_argument('--name', type=str, default='', help='Name of the experiment')
+    parser.add_argument('--print', action='store_true', help='Print results')
+
+    # run a single algorithm
+    parser.add_argument('--single_alg', type=str, default=None, help='Name of the algorithm to run')
 
     # experiment for general model misspecification
-    parser.add_argument("--mis", type=bool, default=False, help="Run the general model misspecification experiment")
+    parser.add_argument("--mis", action='store_true', help="Run the general model misspecification experiment")
     args = parser.parse_args()
     return args
 
@@ -133,9 +137,9 @@ for alg in algorithms:
 # Store all thetas for environment
 args.theta_all = []
 
+env = Environment(env_config)
 for i in tqdm(range(args.n_rep), desc="Running experiments"):
     # Create environment instance
-    env = Environment(env_config)
     
     # Generate theta for this repetition
     # theta = env.generate_theta()
@@ -146,6 +150,9 @@ for i in tqdm(range(args.n_rep), desc="Running experiments"):
     Bandit_1 = LinBandit(env=env, args=args)
     
     for alg in alg_dict.keys():
+
+        if args.single_alg is not None and alg != args.single_alg:
+            continue
         # Execute algorithm
         result_dict = alg_dict[alg](Bandit_1)
         
@@ -161,14 +168,14 @@ for i in tqdm(range(args.n_rep), desc="Running experiments"):
         history_dict['theta_est_batch'][alg][i, :, :] = weighted_theta_est(
             history=result_dict, 
             pi_nd=pi_nd,
-            sigma_e=args.sigma_e
+            sigma_e=env.sigma_e
         )
         history_dict['theta_est_naive'][alg][i, :, :] = naive_theta_est(result_dict)
 
 # I want to reduce the memory usage
-del history_dict['theta_est']
-del history_dict['pi_list']
-del history_dict['avg_pa_list']
+# del history_dict['theta_est']
+# del history_dict['pi_list']
+# del history_dict['avg_pa_list']
         
 # Save history dictionary to a pickle file
 if args.env == 'random':
@@ -177,3 +184,10 @@ else:
     name = f'{args.save_path}history_dict_{args.env}_{args.name}.pkl'
 with open(name, 'wb') as f:
     pickle.dump((history_dict, args), f)
+
+if args.print and args.single_alg is not None:
+    print("true theta \n", env.theta) if not args.mis else print("true theta \n", env.best_theta)
+    print("weighted theta est \n", np.mean(history_dict['theta_est'][args.single_alg], axis=0)[:, 1, :])
+    print("var est \n", np.mean(history_dict['var_est_list'][args.single_alg], axis=0)[-1])
+    print("coverage \n", np.mean(history_dict['coverage_list'][args.single_alg], axis=0)[-1])
+    print("weighted theta std \n", np.std(history_dict['theta_est'][args.single_alg], axis=0)[:, 1, :]**2)
