@@ -36,6 +36,7 @@ def parse_args():
     parser.add_argument('--save_path', type=str, default='./runs/', help='Path to save results')
     parser.add_argument('--name', type=str, default='', help='Name of the experiment')
     parser.add_argument('--print', action='store_true', help='Print results')
+    parser.add_argument('--no_aux', action='store_true', help='Do not use auxiliary data')
 
     # run a single algorithm
     parser.add_argument('--single_alg', type=str, default=None, help='Name of the algorithm to run')
@@ -178,12 +179,16 @@ for i in tqdm(range(args.n_rep), desc="Running experiments"):
 # del history_dict['avg_pa_list']
         
 # Save history dictionary to a pickle file
-if args.env == 'random':
-    name = f'{args.save_path}history_dict_random_{args.sigma_s}_{args.sigma_e}_{args.name}.pkl'
-else:
-    name = f'{args.save_path}history_dict_{args.env}_{args.name}.pkl'
-with open(name, 'wb') as f:
-    pickle.dump((history_dict, args), f)
+for alg in alg_dict.keys():
+    if args.env == 'random':
+        name = f'{args.save_path}history_dict_random_{args.sigma_s}_{args.sigma_e}_{args.name}_{alg}.pkl'
+    else:
+        name = f'{args.save_path}history_dict_{args.env}_{args.name}_{alg}.pkl'
+    
+    # Save individual algorithm data
+    alg_data = {key: history_dict[key][alg] for key in history_dict.keys()}
+    with open(name, 'wb') as f:
+        pickle.dump((alg_data, args), f)
 
 if args.print and args.single_alg is not None:
     print("true theta \n", env.theta) if not args.mis else print("true theta \n", env.best_theta)

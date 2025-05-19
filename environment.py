@@ -18,8 +18,8 @@ class EnvConfig:
     p0: float = 0.1  # minimum probability threshold
     context_noise: str = "Gaussian"  # noise type: "Gaussian" or "Laplace" or "Student-t"
     # algorithm specific parameters
-    q: int = 2  # degree of polynomial for polynomial environment
-    hidden_dim: int = 10  # hidden dimension for neural network
+    q: int = 4  # degree of polynomial for polynomial environment
+    hidden_dim: int = 5  # hidden dimension for neural network
     df: int = 10  # degrees of freedom for Student-t noise
     def __post_init__(self):
         self.theta = None
@@ -51,6 +51,7 @@ class Environment:
         self.n_action = config.n_action
         self.theta = config.theta
         self.nn = None
+        self.best_theta = None
         self.sigma_eta = config.sigma_eta
         self.sigma_e = config.sigma_e
         self.sigma_s = config.sigma_s
@@ -261,11 +262,14 @@ class Environment:
         reward_policy = np.sum(mean_rewards * pi_t)
         
         return reward_oracle_t - reward_policy
-    def compute_best_linear_theta(self, n = 1000):
+    def compute_best_linear_theta(self, n = 100000):
+        if self.best_theta is not None:
+            return self.best_theta
         x_list, x_tilde_list = self.generate_context(n)
         potential_reward_list, at_dag_list = self.generate_potential_rewards(x_list, x_tilde_list, noise = False)
         best_theta = np.zeros((self.d, self.n_action))
         XX = np.linalg.inv(np.dot(x_tilde_list.T, x_tilde_list))
         for a in range(self.n_action):
             best_theta[:, a] = np.dot(XX, np.dot(x_tilde_list.T, potential_reward_list[:, a]))
+        self.best_theta = best_theta
         return best_theta

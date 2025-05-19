@@ -8,3 +8,5 @@ You may visualize the results by running `failure1.ipynb`
 rsync -av --exclude-from=sync_exclude.txt ~/Desktop/Research/Predicted_context_inference/ zipingxu@login.rc.fas.harvard.edu:/n/home03/zipingxu/Predicted_context_inference/
 rsync -av zipingxu@login.rc.fas.harvard.edu:/n/home03/zipingxu/Predicted_context_inference/runs/ ~/Desktop/Research/Predicted_context_inference/runs/
 
+rsync -av zipingxu@login.rc.fas.harvard.edu:/n/home03/zipingxu/Predicted_context_inference/runs/0518/ ~/Desktop/Research/Predicted_context_inference/runs/0518/
+

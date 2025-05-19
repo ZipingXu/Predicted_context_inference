@@ -1,0 +1,110 @@
+import os
+import itertools
+
+log_dir = "./logs/0518/"
+# Default parameters
+default_params = {
+    "-l": 0.1,
+    "--sigma_eta": 0.05,
+    "--context_noise": "Gaussian",
+    "--p0": 0.05,
+    "--sigma_s": 0.1,  # Default for random failure type
+    "--sigma_e": 0.5,
+    "--coverage_freq": 333,
+    "--n_rep": 5000,
+    "--seed": 42,
+    "--save_path": "./runs/0518/",
+    "-T": 1001,
+    "--name": ""
+}
+
+# Create directory for saving results if it doesn't exist
+os.makedirs(default_params["--save_path"], exist_ok=True)
+os.makedirs(log_dir, exist_ok=True)
+
+
+# Define experiments for each failure type
+experiments = {
+    "failure1": [
+        {"--mis": [True, False], "--env": "failure1"},
+    ],
+    "failure2": [
+        {"--mis": [True, False], "--env": "failure2"},
+    ],
+    "random": [
+        {"--mis": [True, False], "--env": "random"},
+    ],
+    "polynomial": [
+        {"--mis": [True], "--env": "polynomial"},
+    ],
+    "neural_network": [
+        {"--mis": [True], "--env": "neural_network"},
+    ]
+}
+
+def create_sbatch_command(params):
+    """Create an sbatch command with the given parameters."""
+    name = params["--name"]
+    PART="murphy,shared"             # Partition names
+    MEMO=40960                     # Memory required (40GB)
+    TIME="48:00:00"                  # Time required (48 hours)
+    EMAIL="zipingxu@fas.harvard.edu"
+    out_file = f"{log_dir}{params['--env']}_{name}.out"
+    err_file = f"{log_dir}{params['--env']}_{name}.err"
+    
+    # ORDP="sbatch --mem=$MEMO -n 1 -p $PART --time=$TIME --mail-user=$EMAIL"
+    cmd = "sbatch -o %s -e %s --mem %s -p %s --time %s --mail-user %s sbatch_run_exp.sh "%(out_file, err_file, MEMO, PART, TIME, EMAIL)
+    
+    
+    
+    # Add all parameters to the command
+
+    for key, value in params.items():
+        cmd += f" {key} {value}"
+    
+    return cmd
+
+def run_experiments():
+    """Run all experiments for all failure types."""
+    for failure_type, experiment_list in experiments.items():
+        print(f"Running experiments for {failure_type}")
+        
+        for experiment in experiment_list:
+            # Get the parameter to vary and its values
+            param_to_vary = list(experiment.keys())[0]
+            if param_to_vary.startswith("--failure"):
+                param_to_vary = list(experiment.keys())[1]
+            
+            values = experiment[param_to_vary]
+            fixed_params = {k: v for k, v in experiment.items() if k != param_to_vary}
+            
+            print(f"  Varying {param_to_vary} with values {values}")
+            
+            # Run each variation
+            for value in values:
+                # Start with default parameters
+                run_params = default_params.copy()
+                
+                # Update with fixed parameters for this experiment
+                run_params.update(fixed_params)
+                
+                # Set the parameter we're varying
+                run_params[param_to_vary] = value
+
+                if param_to_vary == "--mis":
+                    if value == True:
+                        run_params[param_to_vary] = ""
+                    else:
+                        del run_params[param_to_vary]
+
+                run_params["--name"] = f"{param_to_vary.split('-')[-1]}_{value}"
+                if os.path.exists(f"{log_dir}/{run_params['--env']}_{run_params['--name']}.out"):
+                    print(f"    Skipping {run_params['--env']}_{run_params['--name']} because it already exists")
+                    continue
+                # Create and execute the sbatch command
+                cmd = create_sbatch_command(run_params)
+                print(f"    Running: {cmd}")
+                os.system(cmd)
+
+if __name__ == "__main__":
+    run_experiments() 

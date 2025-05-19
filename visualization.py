@@ -23,6 +23,32 @@ algorithms = ['UCB', 'TS', 'MEB', 'Boltzmann', 'Random']
 
 n_plot = len(algorithms)
 
+def plot_variance_w_ax(history_dict, args, ax = None, y_low = None, echo = False):
+    if ax is None:
+        ax = plt.gca()
+    colors = plt.cm.Set2(np.linspace(0, 1, len(algorithms)))
+    for i_algorithm, algorithm in enumerate(algorithms):
+        # Calculate mean after removing outliers (values beyond 3 standard deviations)
+        means = np.median(history_dict['theta_est'][algorithm], axis=0)[0, :, 0]
+        
+        
+        # Calculate mean after removing outliers (values beyond 3 standard deviations)
+        var_estimates = np.sqrt(history_dict['var_est_list'][algorithm])
+        mean_var = np.mean(var_estimates, axis=0)
+        std_var = np.quantile(var_estimates, 0.95, axis=0)
+        mask = np.abs(var_estimates - mean_var) <= std_var
+        stds = np.mean(var_estimates * mask, axis=0)
+        ax.plot(np.arange(1, args.T+1, args.coverage_freq), means, color=colors[i_algorithm], label=algorithm)
+        ax.scatter(np.arange(1, args.T+1, args.coverage_freq), means, color=colors[i_algorithm], alpha=0.5)
+        ax.fill_between(np.arange(1, args.T+1, args.coverage_freq),
+                       means - stds, 
+                       means + stds, 
+                       color=colors[i_algorithm], alpha=0.1)
+    ax.set_title('Variance of $\\theta$ across Algorithms')
+    ax.set_xlabel('T')
+    ax.set_ylabel('Variance')
+    ax.legend()
+
 def plot_coverage(history_dict, args, save = None, y_low = None, echo = False):
     fig, ax = plt.subplots(figsize=(8, 5))
     coverage_freq = args.coverage_freq
@@ -57,7 +83,7 @@ def plot_coverage(history_dict, args, save = None, y_low = None, echo = False):
     else:
         plt.show()
 
-def plot_coverage_w_ax(history_dict, args, ax=None, y_low=None):
+def plot_coverage_w_ax(history_dict, args, ax=None, y_high=None, y_low=None, alpha = 0.95):
     """
     Plot coverage with a specified axis for subplot grids.
     Similar to plot_coverage but works with external subplots.
@@ -87,8 +113,8 @@ def plot_coverage_w_ax(history_dict, args, ax=None, y_low=None):
     ax.set_xlabel('T')
     ax.set_ylabel('Coverage')
     if y_low is not None:
-        ax.set_ylim(y_low, 1)
-    ax.axhline(y=0.95, color='red', linestyle='--', label='Target Coverage')
+        ax.set_ylim(y_low, y_high)
+    ax.axhline(y=alpha, color='red', linestyle='--', label='Target Coverage')
     ax.legend()
     
     # No plt.tight_layout() or plt.show() as these will be handled by the caller
